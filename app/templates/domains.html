@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ site.name }} 的域名{% endblock %}
+{% block body %}
+<header class="page-head">
+  <div>
+    <p class="crumb">{% if signed_in %}<a href="/sites">平台</a><span>/</span>{% endif %}{{ site.name }}</p>
+    <h1>{{ site.name }}</h1>
+    <p class="muted">{{ provider_label(site.provider) }}{% if signed_in %} · {{ proxy_mode(site) }}{% endif %}</p>
+  </div>
+  {% if signed_in %}<a class="btn" href="/sites/{{ site.id }}/edit">编辑密钥</a>{% endif %}
+</header>
+{% include "live.html" %}
+<section class="panel">
+  {% if signed_in and site.last_error %}
+    <div class="alert err">{{ site.last_error }}</div>
+  {% endif %}
+  <form class="filters panel-bar" method="get" action="/sites/{{ site.id }}/domains">
+    <input type="search" name="q" value="{{ keyword }}" placeholder="搜索域名">
+    <select class="loc-pick" name="loc" onchange="this.form.requestSubmit()">
+      <option value="live" {% if location == 'live' %}selected{% endif %}>现网在这个平台（{{ live_count }}）</option>
+      <option value="all" {% if location == 'all' %}selected{% endif %}>全部（{{ all_count }}）</option>
+      {% for item in ["阿里DNS", "DNSPod", "Wix", "解析在外站", "公网未委托", "NS查询失败", "未检查"] %}
+        <option value="{{ item }}" {% if location == item %}selected{% endif %}>{{ item }}{% if counts.get(item) %}（{{ counts.get(item) }}）{% endif %}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary" type="submit">搜索</button>
+    {% if offsite_count and location == 'live' %}
+    <a href="/sites/{{ site.id }}/domains?q={{ quote(keyword) }}&loc={{ quote('解析在外站') }}">{{ offsite_count }} 个解析在外站</a>
+    {% endif %}
+  </form>
+  {% if zones %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>域名</th><th>记录数</th><th>解析位置</th></tr>
+      </thead>
+      <tbody>
+        {% for zone in zones %}
+        {% set location_text = display_location(zone.ns_location) %}
+        <tr>
+          <td>
+            {% set target = jumps.get(zone.domain) %}
+            <a class="name" href="/zone?site_id={{ target.site_id if target else site.id }}&domain={{ quote(zone.domain) }}">{{ zone.domain }}</a>
+            {% if target %}<span class="sub">解析在「{{ target.site_name }}」{{ provider_label(target.provider) }}</span>{% endif %}
+          </td>
+          <td class="num">{{ zone.record_count }}</td>
+          <td>
+            {% if location_text %}
+              <span class="badge {{ badge_class(location_text) }}">{{ location_text }}{% if zone.ns_provider and location_text == '解析在外站' %} · {{ zone.ns_provider }}{% endif %}</span>
+            {% else %}
+              <span class="badge muted">未检查</span>
+            {% endif %}
+            {% set raw = (zone.ns_public or zone.dns_servers or "") %}
+            {% set servers = raw.replace(";", " ").replace(",", " ").split() %}
+            {% if servers %}
+            <span class="sub" title="{{ servers|join(' ') }}">{{ servers[:2]|join(" ") }}{% if servers|length > 2 %} +{{ servers|length - 2 }}{% endif %}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% set pager_base = '/sites/' ~ site.id ~ '/domains?q=' ~ quote(keyword) ~ '&loc=' ~ quote(location) ~ '&size=' ~ page_size ~ '&page=' %}
+  {% set pager_action = '/sites/' ~ site.id ~ '/domains' %}
+  {% set pager_unit = '个域名' %}
+  {% set pager_hidden = [('q', keyword), ('loc', location)] %}
+  {% include "pager.html" %}
+  {% else %}
+    <p class="empty muted">{% if updating %}正在获取域名。{% elif location == 'live' %}没有公网 NS 在这个平台的域名。{% else %}没有符合条件的域名。{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

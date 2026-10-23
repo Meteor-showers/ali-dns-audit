@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block finder %}{% endblock %}
+{% block title %}{{ query }} · 查询结果{% endblock %}
+{% block body %}
+<header class="page-head">
+  <div>
+    <p class="crumb"><a href="/">查询</a><span>/</span>结果</p>
+    <h1>{{ query }}</h1>
+  </div>
+</header>
+<form class="search-form search-hero panel" method="get" action="/search">
+  <input type="text" name="q" value="{{ query }}" required>
+  <button class="btn btn-primary" type="submit">查询</button>
+</form>
+<section class="panel">
+  {% if matches %}
+    <div class="panel-bar"><h2>找到 {{ matches|length }} 个平台持有这个域名</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>平台</th><th>服务商</th><th>主域名</th><th>公网解析</th></tr>
+        </thead>
+        <tbody>
+          {% for zone in matches %}
+          <tr>
+            <td>{{ zone.site_name }}</td>
+            <td>{{ provider_label(zone.provider) }}</td>
+            {% set host = relative_host(query, zone.domain) %}
+            <td><a class="name" href="/zone?site_id={{ zone.site_id }}&domain={{ quote(zone.domain) }}&q={{ quote(query) }}{% if host and host != '@' %}&rq={{ quote(host) }}{% endif %}">{{ zone.domain }}</a></td>
+            <td>
+              {% if zone.ns_location %}
+                <span class="badge {{ badge_class(zone.ns_location) }}">{{ zone.ns_location }}</span>
+              {% else %}
+                <span class="badge muted">正在查询</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <h2>没有找到 {{ query }}</h2>
+    <p class="muted">现有域名里没有能包住这个名字的主域名。{% if signed_in %}确认平台密钥是否正确，刚添加的平台等一会儿再查。{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

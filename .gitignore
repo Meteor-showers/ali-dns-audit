@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+data/*.db
+data/session.secret
+data/console.pid
+data/console.log

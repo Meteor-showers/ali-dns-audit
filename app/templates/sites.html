@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}平台 · DNS 控制台{% endblock %}
+{% block body %}
+<header class="page-head">
+  <div>
+    <h1>平台</h1>
+    <p class="lead">每个平台一份密钥。域名和解析会自动更新。</p>
+  </div>
+  <a class="btn btn-primary" href="/sites/new">添加平台</a>
+</header>
+{% include "live.html" %}
+<section class="panel">
+  {% if sites %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>平台</th><th>服务商</th><th>域名</th><th>出口</th><th>状态</th><th class="row-actions">操作</th></tr>
+      </thead>
+      <tbody>
+        {% for site in sites %}
+        <tr>
+          <td><a class="name" href="/sites/{{ site.id }}/domains">{{ site.name }}</a></td>
+          <td>{{ provider_label(site.provider) }}</td>
+          <td class="num">{{ counts.get(site.id, 0) }}</td>
+          <td>{{ proxy_mode(site) }}</td>
+          <td>{% if site.last_error %}<span class="badge bad">失败</span>{% else %}<span class="badge ok">正常</span>{% endif %}</td>
+          <td class="row-actions">
+            <a href="/sites/{{ site.id }}/edit">编辑</a>
+            <form method="post" action="/sites/{{ site.id }}/delete" onsubmit="return confirm('删除这个平台？域名和解析会一起删除。');">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="danger" type="submit">删除</button>
+            </form>
+          </td>
+        </tr>
+        {% if site.last_error %}
+        <tr class="note"><td colspan="6">{{ site.last_error }}</td></tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <div class="empty">
+      <p class="muted">还没有平台。</p>
+      <a class="btn btn-primary" href="/sites/new">添加第一个平台</a>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

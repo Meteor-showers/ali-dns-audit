@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}登录 · DNS 控制台{% endblock %}
+{% block body %}
+<section class="panel auth-card">
+  <h1>登录</h1>
+  <p class="lead">进入 DNS 控制台。</p>
+  <form method="post" action="/login">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label><span>用户名</span><input type="text" name="username" required maxlength="32" autocomplete="username" autofocus></label>
+    <label><span>密码</span><input type="password" name="password" required autocomplete="current-password"></label>
+    <button class="btn btn-primary" type="submit">进入</button>
+  </form>
+</section>
+{% endblock %}

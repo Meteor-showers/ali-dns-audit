@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}{{ domain }} · {{ site.name }}{% endblock %}
+{% block body %}
+<header class="page-head">
+  <div>
+    <p class="crumb">{% if signed_in %}<a href="/sites">平台</a><span>/</span>{% endif %}<a href="/sites/{{ site.id }}/domains">{{ site.name }}</a><span>/</span>{{ domain }}</p>
+    <h1>{{ domain }}</h1>
+    <div class="meta">
+      <span class="badge {{ badge_class(ns.location) }}">{{ ns.location }}</span>
+      <span class="muted">{{ site.name }} · {{ provider_label(site.provider) }}{% if ns.provider %} · 公网 {{ ns.provider }}{% endif %}</span>
+    </div>
+    {% if ns.servers %}
+    <p class="ns-line" title="{{ ns.servers|join(' ') }}">{{ ns.servers[:2]|join("  ") }}{% if ns.servers|length > 2 %} +{{ ns.servers|length - 2 }}{% endif %}</p>
+    {% endif %}
+    {% if ns.note %}<p class="muted head-note">{{ ns.note }}</p>{% endif %}
+    {% if ns.location == "解析在外站" %}
+    <p class="warn-line">公网 NS 不在这个平台的 DNS 上。{% if signed_in %}这里改记录不会影响现网访问。{% endif %}</p>
+    {% endif %}
+    {% for other in others %}
+    <p class="muted head-note"><a href="/zone?site_id={{ other.site_id }}&domain={{ quote(other.domain) }}&stay=1">「{{ other.site_name }}」{{ provider_label(other.provider) }} 里也有这个域名</a></p>
+    {% endfor %}
+  </div>
+  <a class="btn" href="/sites/{{ site.id }}/domains">返回列表</a>
+</header>
+{% include "live.html" %}
+
+{% if record_error %}
+<div class="alert err">
+  {% if signed_in %}
+  <div>{{ record_error }}</div>
+  {% if detail and detail != record_error %}<div class="muted">{{ detail }}</div>{% endif %}
+  {% else %}
+  <div>解析记录暂时没有取到。</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-bar">
+    <form class="filters" method="get" action="/zone">
+      <input type="hidden" name="site_id" value="{{ site.id }}">
+      <input type="hidden" name="domain" value="{{ domain }}">
+      <input type="hidden" name="q" value="{{ query or '' }}">
+      <input type="search" name="rq" value="{{ rq or '' }}" placeholder="搜索主机、类型、记录值">
+      <button class="btn" type="submit">搜索</button>
+      {% if rq %}<a class="btn" href="/zone?site_id={{ site.id }}&domain={{ quote(domain) }}">清除</a>{% endif %}
+    </form>
+    {% if signed_in %}
+    <button class="btn btn-primary" type="button" onclick="var box=document.getElementById('add-record'); box.open=!box.open;">添加解析</button>
+    {% endif %}
+  </div>
+  {% if signed_in %}
+  <details id="add-record" class="adder">
+    <summary hidden>添加解析</summary>
+    <form method="post" action="/zone/records">
+      {% set submit_label = "添加" %}
+      <div class="adder-body">
+        {% include "record_form.html" %}
+      </div>
+    </form>
+  </details>
+  {% endif %}
+  {% if records %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>主机</th><th>类型</th><th>线路</th><th>记录值</th><th>TTL</th><th>优先级</th><th>创建时间</th><th>更新时间</th><th>状态</th>{% if signed_in %}<th class="row-actions">操作</th>{% endif %}</tr>
+      </thead>
+      <tbody>
+        {% for item in records %}
+        <tr id="rec-{{ item.id }}" class="{% if focus == item.id or (highlight and item.host == highlight) %}hit{% endif %}">
+          <td class="name">{{ item.host }}</td>
+          <td>{{ item.type }}</td>
+          <td>{{ line_label(site.provider, item.line) }}</td>
+          <td class="value">
+            <div class="shown">
+              <span class="value-line">
+                <span>{{ item.value }}</span>
+                <button type="button" class="copy" data-copy="{{ item.value }}">复制</button>
+              </span>
+              {% if item.remark and item.remark != "—" %}<span class="sub">{{ item.remark }}</span>{% endif %}
+            </div>
+            {% if signed_in %}
+            <div class="editor">
+              <input class="editor" form="edit-{{ item.id }}" type="text" name="value" required value="{{ item.value }}" aria-label="记录值">
+              <input class="editor" form="edit-{{ item.id }}" type="text" name="remark" maxlength="200" value="{% if item.remark and item.remark != '—' %}{{ item.remark }}{% endif %}" placeholder="备注" aria-label="备注" {% if site.provider == 'dnspod' %}readonly title="DNSPod Token 的备注以云上为准，保存不会写回"{% elif site.provider == 'wix' %}readonly title="Wix 没有备注"{% endif %}>
+            </div>
+            {% endif %}
+          </td>
+          <td class="num">
+            <span class="shown">{{ item.ttl }}</span>
+            {% if signed_in %}<input class="editor" form="edit-{{ item.id }}" type="number" name="ttl" min="1" max="86400" value="{{ item.ttl }}" aria-label="TTL">{% endif %}
+          </td>
+          <td class="num">{{ item.priority if item.priority is not none else "—" }}</td>
+          <td class="num" {% if item.created_at == '—' %}title="这个服务商没有返回创建时间"{% endif %}>{{ item.created_at or "—" }}</td>
+          <td class="num">{{ item.updated_at or "—" }}</td>
+          <td>
+            {% if signed_in and site.provider != 'wix' %}
+            <form method="post" action="/zone/record/status">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <input type="hidden" name="site_id" value="{{ site.id }}">
+              <input type="hidden" name="domain" value="{{ domain }}">
+              <input type="hidden" name="q" value="{{ query or '' }}">
+              <input type="hidden" name="rq" value="{{ rq or '' }}">
+              <input type="hidden" name="record_id" value="{{ item.id }}">
+              <input type="hidden" name="status" value="{{ 'disable' if record_enabled(item.status) else 'enable' }}">
+              <label class="switch">
+                <input type="checkbox" role="switch" {% if record_enabled(item.status) %}checked{% endif %} aria-label="{{ '已启用，点击停止' if record_enabled(item.status) else '已停止，点击启用' }}" onchange="if (!this.checked && !confirm('停止这条解析？停止后公网不再使用它。')) { this.checked = true; return; } this.form.requestSubmit();">
+                <span></span>
+              </label>
+            </form>
+            {% else %}
+            <span class="badge {{ 'ok' if record_enabled(item.status) else 'muted' }}">{{ '启用' if record_enabled(item.status) else '停止' }}</span>
+            {% endif %}
+          </td>
+          {% if signed_in %}
+          <td class="row-actions">
+            <button type="button" class="row-edit">编辑</button>
+            <form id="edit-{{ item.id }}" class="editor" method="post" action="/zone/record">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <input type="hidden" name="inline" value="1">
+              <input type="hidden" name="site_id" value="{{ site.id }}">
+              <input type="hidden" name="domain" value="{{ domain }}">
+              <input type="hidden" name="q" value="{{ query or '' }}">
+              <input type="hidden" name="rq" value="{{ rq or '' }}">
+              <input type="hidden" name="page" value="{{ page }}">
+              <input type="hidden" name="record_id" value="{{ item.id }}">
+              <input type="hidden" name="host" value="{{ item.host }}">
+              <input type="hidden" name="type" value="{{ item.type }}">
+              <input type="hidden" name="line" value="{{ item.line }}">
+              <input type="hidden" name="priority" value="{% if item.priority is not none %}{{ item.priority }}{% endif %}">
+              <button type="submit">保存</button>
+              <button type="button" class="row-cancel">取消</button>
+            </form>
+            <a class="more-edit" href="/zone/record?site_id={{ site.id }}&domain={{ quote(domain) }}&record_id={{ quote(item.id) }}&q={{ quote(query or '') }}&rq={{ quote(rq or '') }}">更多</a>
+            <form method="post" action="/zone/record/delete" onsubmit="return confirm('删除这条解析记录？');">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <input type="hidden" name="site_id" value="{{ site.id }}">
+              <input type="hidden" name="domain" value="{{ domain }}">
+              <input type="hidden" name="q" value="{{ query or '' }}">
+              <input type="hidden" name="rq" value="{{ rq or '' }}">
+              <input type="hidden" name="record_id" value="{{ item.id }}">
+              <button class="danger" type="submit">删除</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% set pager_base = '/zone?site_id=' ~ site.id ~ '&domain=' ~ quote(domain) ~ '&q=' ~ quote(query or '') ~ '&rq=' ~ quote(rq or '') ~ '&size=' ~ page_size ~ '&page=' %}
+  {% set pager_action = '/zone' %}
+  {% set pager_unit = '条' %}
+  {% set pager_hidden = [('site_id', site.id), ('domain', domain), ('q', query or ''), ('rq', rq or '')] %}
+  {% include "pager.html" %}
+  {% else %}
+    <p class="empty muted">{% if updating %}正在获取解析记录。{% elif rq %}没有匹配的解析记录。{% else %}没有解析记录。{% endif %}</p>
+  {% endif %}
+</section>
+<script>
+document.querySelectorAll("button.copy").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    var text = btn.getAttribute("data-copy") || "";
+    var done = function (ok) {
+      var old = btn.textContent;
+      btn.textContent = ok ? "已复制" : "未复制";
+      setTimeout(function () { btn.textContent = old; }, 1200);
+    };
+    var fallback = function () {
+      var box = document.createElement("textarea");
+      box.value = text;
+      box.setAttribute("readonly", "");
+      box.style.position = "fixed";
+      box.style.left = "-9999px";
+      document.body.appendChild(box);
+      box.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+      box.remove();
+      done(ok);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }).catch(fallback);
+      return;
+    }
+    fallback();
+  });
+});
+document.querySelectorAll("button.row-edit").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    var row = btn.closest("tr");
+    document.querySelectorAll("tr.editing").forEach(function (open) {
+      if (open !== row) open.classList.remove("editing");
+    });
+    row.classList.add("editing");
+    var input = row.querySelector("input[name=value]");
+    if (input) input.focus();
+  });
+});
+document.querySelectorAll("button.row-cancel").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    btn.closest("tr").classList.remove("editing");
+  });
+});
+</script>
+{% endblock %}

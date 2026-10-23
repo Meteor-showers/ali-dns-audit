@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}编辑解析 · {{ domain }}{% endblock %}
+{% block body %}
+<header class="page-head">
+  <div>
+    <p class="crumb">
+      <a href="/sites">平台</a><span>/</span>
+      <a href="/sites/{{ site.id }}/domains">{{ site.name }}</a><span>/</span>
+      <a href="/zone?site_id={{ site.id }}&domain={{ quote(domain) }}">{{ domain }}</a>
+    </p>
+    <h1>编辑 {{ record.host }} · {{ record.type }}</h1>
+    <p class="muted">{{ site.name }} / {{ domain }}</p>
+  </div>
+</header>
+<section class="panel">
+  <form method="post" action="/zone/record">
+    {% set submit_label = "保存" %}
+    {% include "record_form.html" %}
+    <a class="btn" href="/zone?site_id={{ site.id }}&domain={{ quote(domain) }}&q={{ quote(query or '') }}&rq={{ quote(rq or '') }}">取消</a>
+  </form>
+</section>
+{% endblock %}

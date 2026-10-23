@@ -1,0 +1,41 @@
+<div class="pager">
+  <span class="muted">共 {{ total }} {{ pager_unit }}，第 {{ page }} / {{ pages }} 页</span>
+  <div class="toolbar pages">
+    {% if pages > 1 %}
+      {% if page > 1 %}
+        <a class="btn btn-sm" href="{{ pager_base }}{{ page - 1 }}">上一页</a>
+      {% endif %}
+      {% for number in page_window(page, pages) %}
+        {% if number is none %}
+          <span class="ellipsis">…</span>
+        {% elif number == page %}
+          <span class="btn btn-sm page-current">{{ number }}</span>
+        {% else %}
+          <a class="btn btn-sm" href="{{ pager_base }}{{ number }}">{{ number }}</a>
+        {% endif %}
+      {% endfor %}
+      {% if page < pages %}
+        <a class="btn btn-sm" href="{{ pager_base }}{{ page + 1 }}">下一页</a>
+      {% endif %}
+    {% endif %}
+    <form class="jump" method="get" action="{{ pager_action }}">
+      {% for key, value in pager_hidden %}
+        <input type="hidden" name="{{ key }}" value="{{ value }}">
+      {% endfor %}
+      <label class="size-pick">
+        <span>每页</span>
+        <select name="size" aria-label="每页条数" onchange="var field=this.form.elements.page; if (field) field.value=1; this.form.requestSubmit()">
+          {% for count in page_sizes %}
+            <option value="{{ count }}" {% if count == page_size %}selected{% endif %}>{{ count }} 条</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if pages > 1 %}
+        <input type="number" name="page" min="1" max="{{ pages }}" value="{{ page }}" aria-label="页码">
+        <button class="btn btn-sm" type="submit">跳转</button>
+      {% else %}
+        <input type="hidden" name="page" value="1">
+      {% endif %}
+    </form>
+  </div>
+</div>

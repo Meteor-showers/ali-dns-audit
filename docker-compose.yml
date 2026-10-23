@@ -1,0 +1,8 @@
+services:
+  dns-console:
+    image: plutosdocker/ali-dns-audit:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}创建账号 · DNS 控制台{% endblock %}
+{% block body %}
+<section class="panel auth-card">
+  <h1>{% if legacy %}补上用户名{% else %}创建账号{% endif %}</h1>
+  <p class="lead">
+    {% if legacy %}
+    这个控制台已经有登录密码。补一个用户名后，用用户名和原来的密码登录。
+    {% else %}
+    这个控制台会保存各站 DNS 密钥。先创建一个账号，之后用用户名和密码登录。
+    {% endif %}
+  </p>
+  <form method="post" action="/setup">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label><span>用户名</span><input type="text" name="username" required maxlength="32" autocomplete="username" autofocus></label>
+    {% if legacy %}
+    <label><span>当前密码</span><input type="password" name="password" required autocomplete="current-password"></label>
+    {% else %}
+    <label><span>密码</span><input type="password" name="password" required minlength="6" autocomplete="new-password"></label>
+    <label><span>再输入一次</span><input type="password" name="confirm" required minlength="6" autocomplete="new-password"></label>
+    {% endif %}
+    <button class="btn btn-primary" type="submit">{% if legacy %}继续使用{% else %}开始使用{% endif %}</button>
+  </form>
+</section>
+{% endblock %}

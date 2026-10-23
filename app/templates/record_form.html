@@ -1,0 +1,46 @@
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="site_id" value="{{ site.id }}">
+<input type="hidden" name="domain" value="{{ domain }}">
+<input type="hidden" name="q" value="{{ query or '' }}">
+<input type="hidden" name="rq" value="{{ rq if rq is defined else '' }}">
+{% if record is defined and record %}<input type="hidden" name="record_id" value="{{ record.id }}">{% endif %}
+<div class="grid">
+  <label>
+    <span>主机记录</span>
+    <input type="text" name="host" required value="{{ record.host if record is defined and record else '' }}" placeholder="@ 或 www">
+  </label>
+  <label>
+    <span>类型</span>
+    <select name="type">
+      {% for item in record_types %}
+        <option value="{{ item }}" {% if record is defined and record and record.type == item %}selected{% endif %}>{{ item }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    <span>线路</span>
+    <select name="line">
+      {% for value, label in lines %}
+        <option value="{{ value }}" {% if record is defined and record and record.line == value %}selected{% elif (record is not defined or not record) and loop.first %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label class="wide">
+    <span>记录值</span>
+    <input type="text" name="value" required value="{{ record.value if record is defined and record else '' }}">
+  </label>
+  <label class="wide">
+    <span>备注</span>
+    <input type="text" name="remark" maxlength="200" value="{% if record is defined and record and record.remark and record.remark != '—' %}{{ record.remark }}{% endif %}" placeholder="选填" {% if site.provider == 'wix' %}readonly title="Wix 没有备注"{% endif %}>
+  </label>
+  <label>
+    <span>TTL</span>
+    <input type="number" name="ttl" min="1" max="86400" value="{{ record.ttl if record is defined and record else 600 }}">
+  </label>
+  <label>
+    <span>优先级</span>
+    <input type="number" name="priority" value="{% if record is defined and record and record.priority is not none %}{{ record.priority }}{% endif %}" placeholder="MX / SRV">
+  </label>
+</div>
+<p class="help">根域名主机记录填 @。CAA 示例：0 issue "letsencrypt.org"。MX、SRV 不填优先级时按 10。备注会写回阿里云和腾讯云；DNSPod Token 只展示云上已有备注。Wix 没有线路、备注和停止，MX 按「优先级 邮件服务器」提交。</p>
+<button class="btn btn-primary" type="submit">{{ submit_label }}</button>

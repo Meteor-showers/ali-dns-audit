@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}操作记录 · DNS 控制台{% endblock %}
+{% block body %}
+<header class="page-head">
+  <div>
+    <h1>操作记录</h1>
+    <p class="lead">登录、改账号、改平台和改解析会记在这里，并记下当时的来源 IP。后台自动更新不记。</p>
+  </div>
+  <form class="filters" method="get" action="/audit">
+    <input type="text" name="q" value="{{ keyword }}" placeholder="用户、IP、操作或内容" aria-label="搜索操作记录">
+    <button class="btn" type="submit">筛选</button>
+  </form>
+</header>
+<section class="panel">
+  {% if rows %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>时间</th><th>用户</th><th>IP</th><th>操作</th><th>内容</th></tr>
+      </thead>
+      <tbody>
+        {% for item in rows %}
+        <tr>
+          <td class="num">{{ item.created_at }}</td>
+          <td>{{ item.username }}</td>
+          <td class="num">{{ item.ip or "—" }}</td>
+          <td>{{ item.action }}</td>
+          <td class="detail">{% if item.link %}<a href="{{ item.link }}">{{ item.detail or item.action }}</a>{% else %}{{ item.detail or "—" }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% set pager_unit = '条' %}
+  {% set pager_base = '/audit?q=' ~ quote(keyword) ~ '&size=' ~ page_size ~ '&page=' %}
+  {% set pager_action = '/audit' %}
+  {% set pager_hidden = [('q', keyword)] %}
+  {% include "pager.html" %}
+  {% else %}
+  <p class="muted">{% if keyword %}没有匹配的操作记录。{% else %}还没有操作记录。{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

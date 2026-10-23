@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}设置 · DNS 控制台{% endblock %}
+{% block body %}
+<header class="page-head">
+  <div>
+    <h1>设置</h1>
+    <p class="lead">代理和账号。平台没单独填代理时，请求走全局代理。</p>
+  </div>
+</header>
+<section class="panel settings">
+  <div class="settings-split">
+    <div>
+      <h2>全局代理</h2>
+      <p class="help">留空表示直连。支持 http、https、socks5。</p>
+      <form method="post" action="/settings/proxy">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label>
+          <span>代理地址</span>
+          <input type="text" name="global_proxy" value="{{ global_proxy }}" placeholder="socks5://127.0.0.1:1080">
+        </label>
+        <button class="btn btn-primary" type="submit">保存代理</button>
+      </form>
+    </div>
+    <div class="split-rule">
+      <h2>我的密码</h2>
+      <p class="help">当前账号 {{ username }}。</p>
+      <form method="post" action="/settings/password">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label><span>当前密码</span><input type="password" name="current" required autocomplete="current-password"></label>
+        <div class="field-pair">
+          <label><span>新密码</span><input type="password" name="password" required minlength="6" autocomplete="new-password"></label>
+          <label><span>再输入一次</span><input type="password" name="confirm" required minlength="6" autocomplete="new-password"></label>
+        </div>
+        <button class="btn btn-primary" type="submit">更新密码</button>
+      </form>
+    </div>
+  </div>
+</section>
+<section class="panel settings">
+  <h2>账号</h2>
+  <ul class="people">
+    {% for item in users %}
+    <li>
+      <div class="who">
+        <b>{{ item.username }}</b>
+        {% if item.id == admin_id %}<span class="badge info">管理</span>{% endif %}
+        {% if item.id == user_id %}<span class="badge muted">当前</span>{% endif %}
+        <span class="muted">{{ item.created_at.replace('T', ' ') }}</span>
+      </div>
+      {% if item.id != user_id and item.id != admin_id %}
+      <form method="post" action="/settings/users/{{ item.id }}/delete" onsubmit="return confirm('删除账号 {{ item.username }}？');">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="btn btn-sm danger-btn" type="submit">删除</button>
+      </form>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <form class="inline-fields" method="post" action="/settings/users">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label><span>用户名</span><input type="text" name="username" required maxlength="32" autocomplete="off"></label>
+    <label><span>密码</span><input type="password" name="password" required minlength="6" autocomplete="new-password"></label>
+    <label><span>再输入一次</span><input type="password" name="confirm" required minlength="6" autocomplete="new-password"></label>
+    <button class="btn btn-primary" type="submit">添加账号</button>
+  </form>
+</section>
+{% endblock %}

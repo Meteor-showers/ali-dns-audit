@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="/static/favicon.png" type="image/png">
+  <title>{% block title %}DNS 控制台{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css?v=22">
+</head>
+<body class="{% if show_nav %}app side-collapsed{% else %}auth{% endif %}">
+  {% if show_nav %}
+  <script>
+  (function () {
+    try {
+      if (localStorage.getItem("dns-side") === "open" && window.matchMedia("(min-width: 861px)").matches) {
+        document.body.classList.add("side-open");
+        document.body.classList.remove("side-collapsed");
+      }
+    } catch (err) {}
+  })();
+  </script>
+  <button type="button" class="side-toggle" aria-expanded="false" aria-label="展开侧边栏"><span></span></button>
+  <div class="side-backdrop"></div>
+  <aside class="side">
+    <a class="brand" href="/" title="DNS 控制台"><span class="mark" aria-hidden="true">DNS</span><span class="label">DNS 控制台<small>域名解析</small></span></a>
+    <nav>
+      <a href="/" class="{% if active == 'search' %}active{% endif %}" title="查询"><span class="mark" aria-hidden="true">查询</span><span class="label">查询</span></a>
+      {% if signed_in %}
+      <a href="/sites" class="{% if active == 'sites' %}active{% endif %}" title="平台"><span class="mark" aria-hidden="true">平台</span><span class="label">平台</span></a>
+      <a href="/audit" class="{% if active == 'audit' %}active{% endif %}" title="操作记录"><span class="mark" aria-hidden="true">记录</span><span class="label">操作记录</span></a>
+      <a href="/settings" class="{% if active == 'settings' %}active{% endif %}" title="设置"><span class="mark" aria-hidden="true">设置</span><span class="label">设置</span></a>
+      {% endif %}
+    </nav>
+    <div class="side-foot">
+      {% if signed_in %}
+      <div class="account">
+        <span class="avatar">{{ (username or "?")[:1] }}</span>
+        <span class="tip">{{ username }}</span>
+        <div class="account-meta">
+          <b>{{ username }}</b>
+          <form method="post" action="/logout">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button type="submit">退出</button>
+          </form>
+        </div>
+      </div>
+      {% else %}
+      <a class="side-login" href="/login" title="登录"><span class="mark" aria-hidden="true">登录</span><span class="label">登录</span></a>
+      {% endif %}
+    </div>
+  </aside>
+  {% endif %}
+  <div class="main">
+    <main class="content">
+      {% block finder %}
+      {% if show_nav %}
+      <form class="global-search" method="get" action="/search">
+        <input type="search" name="q" placeholder="查询下一个域名或主机" aria-label="查询下一个域名">
+      </form>
+      {% endif %}
+      {% endblock %}
+      <div class="stack">
+        {% if flash_message %}
+          <div class="alert {{ flash_message.level }}">{{ flash_message.text }}</div>
+        {% endif %}
+        {% if error %}
+          <div class="alert err">{{ error }}</div>
+        {% endif %}
+        {% block body %}{% endblock %}
+      </div>
+    </main>
+  </div>
+  {% if show_nav %}
+  <script>
+  (function () {
+    var key = "dns-side";
+    var body = document.body;
+    var btn = document.querySelector(".side-toggle");
+    var side = document.querySelector(".side");
+    var backdrop = document.querySelector(".side-backdrop");
+    var narrow = window.matchMedia("(max-width: 860px)");
+    var fine = window.matchMedia("(hover: hover) and (pointer: fine)");
+    function savedOpen() {
+      try { return localStorage.getItem(key) === "open"; } catch (err) { return false; }
+    }
+    function persist(open) {
+      try { localStorage.setItem(key, open ? "open" : "collapsed"); } catch (err) {}
+    }
+    function paint(open) {
+      body.classList.toggle("side-open", open);
+      body.classList.toggle("side-collapsed", !open);
+      body.classList.remove("side-peek");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.setAttribute("aria-label", open ? "收起侧边栏" : "展开侧边栏");
+    }
+    paint(body.classList.contains("side-open") && !narrow.matches);
+    btn.addEventListener("click", function () {
+      var open = !body.classList.contains("side-open");
+      paint(open);
+      if (!narrow.matches) persist(open);
+    });
+    var timer;
+    side.addEventListener("mouseenter", function () {
+      if (!fine.matches || narrow.matches || body.classList.contains("side-open")) return;
+      clearTimeout(timer);
+      timer = setTimeout(function () { body.classList.add("side-peek"); }, 120);
+    });
+    side.addEventListener("mouseleave", function () {
+      clearTimeout(timer);
+      body.classList.remove("side-peek");
+    });
+    narrow.addEventListener("change", function () {
+      paint(!narrow.matches && savedOpen());
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && (body.classList.contains("side-open") || body.classList.contains("side-peek"))) {
+        paint(false);
+        if (!narrow.matches) persist(false);
+      }
+    });
+    side.querySelectorAll("a").forEach(function (link) {
+      link.addEventListener("click", function () {
+        if (narrow.matches) paint(false);
+      });
+    });
+    backdrop.addEventListener("click", function () { paint(false); });
+  })();
+  </script>
+  {% endif %}
+</body>
+</html>

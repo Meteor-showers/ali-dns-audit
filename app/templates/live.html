@@ -1,0 +1,19 @@
+{% if updating %}
+<p class="live-note">正在更新，完成后会自动换上最新结果。</p>
+<script>
+(function () {
+  var url = {{ live_url|tojson }};
+  var timer = setInterval(function () {
+    fetch(url, {headers: {Accept: "application/json"}})
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data.pending) {
+          clearInterval(timer);
+          location.reload();
+        }
+      })
+      .catch(function () {});
+  }, 1500);
+})();
+</script>
+{% endif %}
