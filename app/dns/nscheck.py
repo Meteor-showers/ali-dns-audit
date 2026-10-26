@@ -38,16 +38,24 @@ def is_wix(host: str) -> bool:
     return host == "wixdns.net" or host.endswith(".wixdns.net")
 
 
+def is_godaddy(host: str) -> bool:
+    return host == "domaincontrol.com" or host.endswith(".domaincontrol.com")
+
+
 def provider_of(hosts: list[str]) -> str:
     names = []
     for host in hosts:
         matched = "其他"
         if is_wix(host):
             matched = "Wix"
+        elif is_godaddy(host):
+            matched = "GoDaddy"
         elif is_dnspod(host):
             matched = "DNSPod"
         else:
             for suffixes, name in PROVIDER_RULES:
+                if name == "GoDaddy":
+                    continue
                 if any(suffix in host for suffix in suffixes):
                     matched = name
                     break
@@ -133,14 +141,14 @@ def classify(provider: str, status: str, hosts: list[str]) -> dict:
         family = "aliyun"
     elif provider == "wix":
         family = "wix"
+    elif provider == "godaddy":
+        family = "godaddy"
     else:
         family = "dnspod"
-    flags = [
-        is_ali(host) if family == "aliyun" else is_wix(host) if family == "wix" else is_dnspod(host)
-        for host in hosts
-    ]
+    checks = {"aliyun": is_ali, "wix": is_wix, "godaddy": is_godaddy, "dnspod": is_dnspod}
+    flags = [checks[family](host) for host in hosts]
     if all(flags):
-        location = {"aliyun": "阿里DNS", "wix": "Wix", "dnspod": "DNSPod"}[family]
+        location = {"aliyun": "阿里DNS", "wix": "Wix", "godaddy": "GoDaddy", "dnspod": "DNSPod"}[family]
         return {"location": location, "provider": actual, "note": "", "servers": hosts}
     note = "部分 NS 指向当前服务商。" if any(flags) else ""
     return {"location": "解析在外站", "provider": actual, "note": note, "servers": hosts}

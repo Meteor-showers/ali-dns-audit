@@ -83,19 +83,19 @@
             {% if signed_in %}
             <div class="editor">
               <input class="editor" form="edit-{{ item.id }}" type="text" name="value" required value="{{ item.value }}" aria-label="记录值">
-              <input class="editor" form="edit-{{ item.id }}" type="text" name="remark" maxlength="200" value="{% if item.remark and item.remark != '—' %}{{ item.remark }}{% endif %}" placeholder="备注" aria-label="备注" {% if site.provider == 'dnspod' %}readonly title="DNSPod Token 的备注以云上为准，保存不会写回"{% elif site.provider == 'wix' %}readonly title="Wix 没有备注"{% endif %}>
+              <input class="editor" form="edit-{{ item.id }}" type="text" name="remark" maxlength="200" value="{% if item.remark and item.remark != '—' %}{{ item.remark }}{% endif %}" placeholder="备注" aria-label="备注" {% if site.provider == 'dnspod' %}readonly title="DNSPod Token 的备注以云上为准，保存不会写回"{% elif plain_dns(site.provider) %}readonly title="这个服务商没有备注"{% endif %}>
             </div>
             {% endif %}
           </td>
           <td class="num">
             <span class="shown">{{ item.ttl }}</span>
-            {% if signed_in %}<input class="editor" form="edit-{{ item.id }}" type="number" name="ttl" min="1" max="86400" value="{{ item.ttl }}" aria-label="TTL">{% endif %}
+            {% if signed_in %}<input class="editor" form="edit-{{ item.id }}" type="number" name="ttl" min="{{ 600 if site.provider == 'godaddy' else 1 }}" max="86400" value="{{ item.ttl }}" aria-label="TTL">{% endif %}
           </td>
           <td class="num">{{ item.priority if item.priority is not none else "—" }}</td>
           <td class="num" {% if item.created_at == '—' %}title="这个服务商没有返回创建时间"{% endif %}>{{ item.created_at or "—" }}</td>
           <td class="num">{{ item.updated_at or "—" }}</td>
           <td>
-            {% if signed_in and site.provider != 'wix' %}
+            {% if signed_in and not plain_dns(site.provider) %}
             <form method="post" action="/zone/record/status">
               <input type="hidden" name="csrf" value="{{ csrf }}">
               <input type="hidden" name="site_id" value="{{ site.id }}">

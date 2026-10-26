@@ -52,10 +52,11 @@
     aliyun: "阿里云 RAM 用户的 AccessKey，需要 AliyunDNSFullAccess 或同等权限。",
     tencent: "腾讯云 API 密钥 SecretId / SecretKey，需要 DNSPod 读写权限。",
     dnspod: "DNSPod 控制台的 Token，ID 和 Token 分开填写。",
-    wix: "账号级 API Key。Account ID 填上面，Authorization 填 API Key。只能改 Wix 托管 DNS 的域名。"
+    wix: "账号级 API Key。Account ID 填上面，Authorization 填 API Key。只能改 Wix 托管 DNS 的域名。",
+    godaddy: "开发者中心的 API Key 和 Secret 分开填写。只能改 GoDaddy 托管 DNS 的域名，TTL 最少 600 秒。"
   };
-  const ak = { aliyun: "AccessKey ID", tencent: "SecretId", dnspod: "Token ID", wix: "Account ID" };
-  const sk = { aliyun: "AccessKey Secret", tencent: "SecretKey", dnspod: "Token", wix: "Authorization" };
+  const ak = { aliyun: "AccessKey ID", tencent: "SecretId", dnspod: "Token ID", wix: "Account ID", godaddy: "API Key" };
+  const sk = { aliyun: "AccessKey Secret", tencent: "SecretKey", dnspod: "Token", wix: "Authorization", godaddy: "Secret" };
   const provider = document.getElementById("provider");
   function syncProvider() {
     const value = provider.value;

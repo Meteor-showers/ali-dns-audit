@@ -497,6 +497,8 @@ def own_ns_location(provider: str) -> str:
         return "阿里DNS"
     if provider == "wix":
         return "Wix"
+    if provider == "godaddy":
+        return "GoDaddy"
     return "DNSPod"
 
 

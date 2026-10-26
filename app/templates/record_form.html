@@ -31,16 +31,16 @@
   </label>
   <label class="wide">
     <span>备注</span>
-    <input type="text" name="remark" maxlength="200" value="{% if record is defined and record and record.remark and record.remark != '—' %}{{ record.remark }}{% endif %}" placeholder="选填" {% if site.provider == 'wix' %}readonly title="Wix 没有备注"{% endif %}>
+    <input type="text" name="remark" maxlength="200" value="{% if record is defined and record and record.remark and record.remark != '—' %}{{ record.remark }}{% endif %}" placeholder="选填" {% if plain_dns(site.provider) %}readonly title="这个服务商没有备注"{% endif %}>
   </label>
   <label>
     <span>TTL</span>
-    <input type="number" name="ttl" min="1" max="86400" value="{{ record.ttl if record is defined and record else 600 }}">
+    <input type="number" name="ttl" min="{{ 600 if site.provider == 'godaddy' else 1 }}" max="86400" value="{{ record.ttl if record is defined and record else 600 }}">
   </label>
   <label>
     <span>优先级</span>
     <input type="number" name="priority" value="{% if record is defined and record and record.priority is not none %}{{ record.priority }}{% endif %}" placeholder="MX / SRV">
   </label>
 </div>
-<p class="help">根域名主机记录填 @。CAA 示例：0 issue "letsencrypt.org"。MX、SRV 不填优先级时按 10。备注会写回阿里云和腾讯云；DNSPod Token 只展示云上已有备注。Wix 没有线路、备注和停止，MX 按「优先级 邮件服务器」提交。</p>
+<p class="help">根域名主机记录填 @。CAA 示例：0 issue "letsencrypt.org"。MX、SRV 不填优先级时按 10。备注会写回阿里云和腾讯云；DNSPod Token 只展示云上已有备注。Wix 和 GoDaddy 没有线路、备注和停止。GoDaddy 的 SRV 记录值填「权重 端口 目标」。</p>
 <button class="btn btn-primary" type="submit">{{ submit_label }}</button>

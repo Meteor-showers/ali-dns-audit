@@ -19,7 +19,7 @@
     <select class="loc-pick" name="loc" onchange="this.form.requestSubmit()">
       <option value="live" {% if location == 'live' %}selected{% endif %}>现网在这个平台（{{ live_count }}）</option>
       <option value="all" {% if location == 'all' %}selected{% endif %}>全部（{{ all_count }}）</option>
-      {% for item in ["阿里DNS", "DNSPod", "Wix", "解析在外站", "公网未委托", "NS查询失败", "未检查"] %}
+      {% for item in ["阿里DNS", "DNSPod", "Wix", "GoDaddy", "解析在外站", "公网未委托", "NS查询失败", "未检查"] %}
         <option value="{{ item }}" {% if location == item %}selected{% endif %}>{{ item }}{% if counts.get(item) %}（{{ counts.get(item) }}）{% endif %}</option>
       {% endfor %}
     </select>

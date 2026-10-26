@@ -6,7 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from app import db
-from app.dns import aliyun, dnspod, wix
+from app.dns import aliyun, dnspod, godaddy, wix
 from app.dns.errors import DnsError
 from app.dns.http import effective_proxy, normalize_proxy
 from app.dns.nscheck import classify, query_ns
@@ -17,6 +17,7 @@ PROVIDERS = {
     "tencent": "腾讯云 DNSPod",
     "dnspod": "DNSPod Token",
     "wix": "Wix",
+    "godaddy": "GoDaddy",
 }
 ALIYUN_LINES = [
     ("default", "默认"),
@@ -44,6 +45,8 @@ def provider_family(provider: str) -> str:
         return "aliyun"
     if provider == "wix":
         return "wix"
+    if provider == "godaddy":
+        return "godaddy"
     if provider in {"tencent", "dnspod"}:
         return "dnspod"
     return ""
@@ -55,6 +58,8 @@ def ns_family(location: str, ns_provider: str) -> str:
         return "aliyun"
     if location == "Wix" or (location == "解析在外站" and "Wix" in text):
         return "wix"
+    if location == "GoDaddy" or (location == "解析在外站" and "GoDaddy" in text):
+        return "godaddy"
     if location == "DNSPod" or (location == "解析在外站" and ("DNSPod" in text or "腾讯" in text)):
         return "dnspod"
     return ""
@@ -82,16 +87,22 @@ def live_zone(zone: dict, zones: list[dict]) -> dict | None:
     return chosen
 
 
+def plain_dns(provider: str) -> bool:
+    return provider in {"wix", "godaddy"}
+
+
 def record_types_for(provider: str) -> list[str]:
     if provider == "wix":
         return list(wix.RECORD_TYPES)
+    if provider == "godaddy":
+        return list(godaddy.RECORD_TYPES)
     return list(RECORD_TYPES)
 
 
 def line_options(provider: str, current: str = "") -> list[tuple[str, str]]:
     if provider == "aliyun":
         options = list(ALIYUN_LINES)
-    elif provider == "wix":
+    elif plain_dns(provider):
         options = [("默认", "默认")]
     else:
         options = list(DNSPOD_LINES)
@@ -121,6 +132,8 @@ def credential_hint(provider: str, access_key: str) -> str:
         return "这看起来是 DNSPod Token ID，不是腾讯云 SecretId。服务商请改成 DNSPod Token。"
     if provider == "wix" and key.upper().startswith("IST."):
         return "这看起来是 API Key，不是 Account ID。Account ID 填上面，Authorization 填下面。"
+    if provider == "godaddy" and ":" in key:
+        return "API Key 和 Secret 要分开填。Key 填上面，Secret 填下面。"
     return ""
 
 
@@ -381,6 +394,8 @@ def parse_record(form, provider: str) -> dict:
         ttl = int(ttl_raw)
     except ValueError as exc:
         raise DnsError("TTL 要是整数。") from exc
+    if provider == "godaddy" and ttl < 600:
+        raise DnsError("GoDaddy 的 TTL 最少 600 秒。")
     if ttl < 1 or ttl > 86400:
         raise DnsError("TTL 需要在 1 到 86400 之间。")
     priority = None
@@ -391,7 +406,7 @@ def parse_record(form, provider: str) -> dict:
             raise DnsError("优先级要是整数。") from exc
     elif record_type in {"MX", "SRV"}:
         priority = 10
-    remark = "" if provider == "wix" else (form.get("remark") or "").strip()
+    remark = "" if plain_dns(provider) else (form.get("remark") or "").strip()
     if len(remark) > 200:
         raise DnsError("备注最多 200 个字。")
     return {
@@ -411,6 +426,8 @@ def _client(site: dict):
         return aliyun
     if site["provider"] == "wix":
         return wix
+    if site["provider"] == "godaddy":
+        return godaddy
     if site["provider"] in {"tencent", "dnspod"}:
         return dnspod
     raise DnsError("未知的 DNS 服务商。")

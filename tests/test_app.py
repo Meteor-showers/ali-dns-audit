@@ -589,3 +589,158 @@ def test_wix_updates_one_value_and_hides_status_switch():
     finally:
         os.environ["DNS_DATA_DIR"] = previous
 
+
+def test_godaddy_replaces_one_value_and_hides_status_switch():
+    from app.dns.errors import DnsError
+    from app.dns.godaddy import decode_id, flatten_records, plan_change, set_record_status, _record_path
+    from app.dns.service import credential_hint, live_zone, parse_record, record_types_for
+
+    raw = [
+        {"type": "A", "name": "@", "data": "1.2.3.4", "ttl": 600},
+        {"type": "A", "name": "@", "data": "5.6.7.8", "ttl": 600},
+        {"type": "MX", "name": "@", "data": "aspmx.l.google.com", "ttl": 3600, "priority": 10},
+        {"type": "SRV", "name": "_sip._tcp", "data": "sip.example.com", "ttl": 600, "priority": 10, "weight": 1, "port": 443},
+    ]
+    rows = flatten_records("example.com", raw)
+    assert [row["host"] for row in rows] == ["@", "@", "@", "_sip._tcp"]
+    assert rows[0]["value"] == "1.2.3.4"
+    mx = next(row for row in rows if row["type"] == "MX")
+    assert mx["priority"] == 10
+    assert mx["value"] == "aspmx.l.google.com"
+    srv = next(row for row in rows if row["type"] == "SRV")
+    assert srv["value"] == "1 443 sip.example.com"
+    assert decode_id(rows[0]["id"])["value"] == "1.2.3.4"
+    assert flatten_records("example.com", [{"type": "A", "name": "WWW", "data": "1.1.1.1", "ttl": 600}])[0]["host"] == "www"
+    assert _record_path("example.com", "A", "@").endswith("/records/A/%40")
+    assert _record_path("example.com", "A", "*").endswith("/records/A/*")
+    moved = plan_change(
+        "example.com",
+        raw[:1],
+        "update",
+        {"type": "A", "host": "www", "value": "1.2.3.4", "ttl": 600, "priority": None},
+        decode_id(rows[0]["id"]),
+    )
+    assert [(item["type"], item["name"]) for item in moved] == [("A", "www"), ("A", "@")]
+    assert moved[1]["records"] == []
+    ns_raw = [{"type": "NS", "name": "@", "data": "ns41.domaincontrol.com", "ttl": 3600}]
+    ns_row = flatten_records("example.com", ns_raw)[0]
+    try:
+        plan_change("example.com", ns_raw, "delete", ns_row, decode_id(ns_row["id"]))
+    except DnsError as exc:
+        assert "NS" in exc.message
+    else:
+        raise AssertionError("根域名最后一条 NS 不能删除")
+    changed = plan_change(
+        "example.com",
+        raw,
+        "update",
+        {"type": "A", "host": "@", "value": "9.9.9.9", "ttl": 600, "priority": None},
+        decode_id(rows[0]["id"]),
+    )
+    assert {row["value"] for row in changed[0]["records"]} == {"9.9.9.9", "5.6.7.8"}
+    removed = plan_change("example.com", raw, "delete", rows[0], decode_id(rows[0]["id"]))
+    assert [row["value"] for row in removed[0]["records"]] == ["5.6.7.8"]
+    try:
+        plan_change(
+            "example.com",
+            raw,
+            "add",
+            {"type": "CNAME", "host": "@", "value": "a.example.net", "ttl": 600, "priority": None},
+        )
+    except DnsError as exc:
+        assert "CNAME" in exc.message
+    else:
+        raise AssertionError("根域名 CNAME 应该被拒绝")
+    try:
+        plan_change(
+            "example.com",
+            raw,
+            "add",
+            {"type": "A", "host": "@", "value": "1.2.3.4", "ttl": 600, "priority": None},
+        )
+    except DnsError as exc:
+        assert "已经存在" in exc.message
+    else:
+        raise AssertionError("重复记录应该被拒绝")
+    try:
+        set_record_status({}, "example.com", "x", False, None)
+    except DnsError as exc:
+        assert "停止" in exc.message
+    else:
+        raise AssertionError("GoDaddy 没有停止")
+    assert "CAA" in record_types_for("godaddy")
+    assert "SPF" not in record_types_for("godaddy")
+    try:
+        parse_record({"host": "@", "type": "A", "value": "1.1.1.1", "ttl": "60"}, "godaddy")
+    except DnsError as exc:
+        assert "600" in exc.message
+    else:
+        raise AssertionError("GoDaddy TTL 不能小于 600")
+    assert "分开填" in credential_hint("godaddy", "key:secret")
+    owned = classify("godaddy", "ok", ["ns41.domaincontrol.com", "ns42.domaincontrol.com"])
+    assert owned["location"] == "GoDaddy"
+    outside = classify("aliyun", "ok", ["ns41.domaincontrol.com"])
+    assert outside["location"] == "解析在外站"
+    assert outside["provider"] == "GoDaddy"
+    assert classify("godaddy", "ok", ["notdomaincontrol.com"])["location"] == "解析在外站"
+    source = {
+        "site_id": 1,
+        "site_name": "站",
+        "provider": "aliyun",
+        "domain": "example.com",
+        "ns_location": "解析在外站",
+        "ns_provider": "GoDaddy",
+    }
+    target = {
+        "site_id": 2,
+        "site_name": "站",
+        "provider": "godaddy",
+        "domain": "example.com",
+        "ns_location": "GoDaddy",
+        "ns_provider": "GoDaddy",
+    }
+    assert live_zone(source, [source, target])["site_id"] == 2
+
+    previous = os.environ["DNS_DATA_DIR"]
+    os.environ["DNS_DATA_DIR"] = tempfile.mkdtemp(prefix="dns-godaddy-")
+    try:
+        from app import db
+
+        with TestClient(app) as client:
+            setup = client.get("/setup")
+            client.post(
+                "/setup",
+                data={"csrf": csrf_from(setup), "username": "ops", "password": "secret1", "confirm": "secret1"},
+                follow_redirects=False,
+            )
+            new_page = client.get("/sites/new")
+            assert "GoDaddy" in new_page.text
+            assert "API Key" in new_page.text
+            saved = client.post(
+                "/sites",
+                data={
+                    "csrf": csrf_from(new_page),
+                    "name": "GoDaddy站",
+                    "provider": "godaddy",
+                    "access_key": "godaddy-key",
+                    "secret_key": "godaddy-secret",
+                    "proxy": "",
+                    "remark": "",
+                },
+                follow_redirects=False,
+            )
+            assert saved.status_code == 303
+            saved_site = [item for item in db.list_sites() if item["name"] == "GoDaddy站"][0]
+            assert saved_site["secret_key"] == "godaddy-secret"
+            db.replace_zones(saved_site["id"], [{"domain": "example.com", "record_count": 1}])
+            db.replace_records(saved_site["id"], "example.com", rows[:1])
+            page = client.get("/zone", params={"site_id": saved_site["id"], "domain": "example.com"})
+            assert page.status_code == 200
+            assert 'role="switch"' not in page.text
+            assert "启用" in page.text
+            assert '<option value="CAA"' in page.text
+            assert '<option value="SPF"' not in page.text
+            assert "godaddy-secret" not in page.text
+    finally:
+        os.environ["DNS_DATA_DIR"] = previous
+

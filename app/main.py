@@ -35,6 +35,7 @@ from app.dns.service import (
     parse_record,
     probe_site,
     provider_label,
+    plain_dns,
     relative_host,
     sync_all,
     set_record_status,
@@ -46,6 +47,7 @@ from app.dns.service import (
 ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
 templates.env.globals["provider_label"] = provider_label
+templates.env.globals["plain_dns"] = plain_dns
 templates.env.globals["line_label"] = line_label
 templates.env.globals["record_enabled"] = record_enabled
 templates.env.globals["status_label"] = lambda value: {
@@ -60,6 +62,7 @@ templates.env.globals["badge_class"] = lambda location: {
     "阿里DNS": "ok",
     "DNSPod": "info",
     "Wix": "info",
+    "GoDaddy": "info",
     "解析在外站": "bad",
     "公网未委托": "warn",
     "域名不存在": "warn",
