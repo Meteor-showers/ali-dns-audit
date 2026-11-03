@@ -77,6 +77,9 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT NOT NULL UNIQUE,
     password_salt TEXT NOT NULL,
     password_hash TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'local',
+    display_name TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 
@@ -144,6 +147,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE audit_logs ADD COLUMN link TEXT NOT NULL DEFAULT ''")
     if audit_columns and "ip" not in audit_columns:
         conn.execute("ALTER TABLE audit_logs ADD COLUMN ip TEXT NOT NULL DEFAULT ''")
+    user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    if user_columns and "kind" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN kind TEXT NOT NULL DEFAULT 'local'")
+    if user_columns and "display_name" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
+    if user_columns and "email" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''")
 
 
 def init() -> None:
@@ -210,7 +220,7 @@ def has_users() -> bool:
 def list_users() -> list[dict]:
     with connect() as conn:
         rows = conn.execute(
-            "SELECT id, username, created_at FROM users ORDER BY id"
+            "SELECT id, username, kind, display_name, email, created_at FROM users ORDER BY id"
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -243,16 +253,39 @@ def count_users() -> int:
         return int(conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"])
 
 
-def create_user(username: str, salt: str, digest: str) -> int:
+def create_user(
+    username: str,
+    salt: str,
+    digest: str,
+    kind: str = "local",
+    display_name: str = "",
+    email: str = "",
+) -> int:
     with connect() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO users(username, password_salt, password_hash, created_at)
-            VALUES(?, ?, ?, ?)
+            INSERT INTO users(username, password_salt, password_hash, kind, display_name, email, created_at)
+            VALUES(?, ?, ?, ?, ?, ?, ?)
             """,
-            (username, salt, digest, now()),
+            (username, salt, digest, kind, display_name, email, now()),
         )
         return int(cursor.lastrowid)
+
+
+def update_user_profile(user_id: int, display_name: str = "", email: str = "") -> None:
+    sets = []
+    args: list = []
+    if display_name:
+        sets.append("display_name = ?")
+        args.append(display_name)
+    if email:
+        sets.append("email = ?")
+        args.append(email)
+    if not sets:
+        return
+    args.append(user_id)
+    with connect() as conn:
+        conn.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = ?", args)
 
 
 def set_user_password(user_id: int, salt: str, digest: str) -> None:

@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import auth, db
+from app import auth, db, ldap_auth
 from app.log import configure_logging
 from app.dns.errors import DnsError
 from app.dns.products import load_usages, preview_usages
@@ -334,19 +334,24 @@ async def setup_submit(request: Request):
 
 @app.get("/login")
 def login_page(request: Request):
-    return render(request, "login.html", show_nav=False)
+    return render(request, "login.html", show_nav=False, ldap_on=ldap_auth.enabled())
 
 
 @app.post("/login")
 async def login_submit(request: Request):
     form = await request.form()
     check_csrf(request, str(form.get("csrf") or ""))
-    username = str(form.get("username") or "").strip()[:32]
+    username = str(form.get("username") or "").strip()[:64]
     password = str(form.get("password") or "")
-    user = auth.authenticate(username, password)
+    message = "用户名或密码不正确。"
+    try:
+        user = auth.login(username, password)
+    except DnsError as exc:
+        user = None
+        message = exc.message
     if not user:
         write_audit(request, "登录失败", username=username or "—")
-        return render(request, "login.html", show_nav=False, error="用户名或密码不正确。", status_code=400)
+        return render(request, "login.html", show_nav=False, ldap_on=ldap_auth.enabled(), error=message, status_code=400)
     start_session(request, user)
     write_audit(request, "登录")
     return redirect("/")
@@ -410,17 +415,23 @@ def search(request: Request, q: str = ""):
     return render(request, "search.html", active="search", query=cleaned, matches=matches)
 
 
+def settings_kwargs(request: Request, global_proxy: str | None = None) -> dict:
+    user_id = int(request.session.get("user_id") or 0)
+    user = db.get_user(user_id) if user_id else None
+    return {
+        "active": "settings",
+        "global_proxy": db.get_setting("global_proxy") if global_proxy is None else global_proxy,
+        "users": db.list_users(),
+        "admin_id": db.first_user_id() or 0,
+        "user_id": user_id,
+        "user_kind": (user or {}).get("kind") or "local",
+        "ldap": ldap_auth.public_config(),
+    }
+
+
 @app.get("/settings")
 def settings_page(request: Request):
-    return render(
-        request,
-        "settings.html",
-        active="settings",
-        global_proxy=db.get_setting("global_proxy"),
-        users=db.list_users(),
-        admin_id=db.first_user_id() or 0,
-        user_id=int(request.session.get("user_id") or 0),
-    )
+    return render(request, "settings.html", **settings_kwargs(request))
 
 
 @app.post("/settings/proxy")
@@ -433,11 +444,7 @@ async def settings_proxy(request: Request):
         return render(
             request,
             "settings.html",
-            active="settings",
-            global_proxy=str(form.get("global_proxy") or ""),
-            users=db.list_users(),
-            admin_id=db.first_user_id() or 0,
-            user_id=int(request.session.get("user_id") or 0),
+            **settings_kwargs(request, str(form.get("global_proxy") or "")),
             error=exc.message,
             status_code=400,
         )
@@ -445,6 +452,64 @@ async def settings_proxy(request: Request):
     write_audit(request, "修改全局代理", "已设置代理" if proxy else "改为直连")
     flash(request, "全局代理已保存。" if proxy else "已改为直连，不再使用全局代理。")
     return redirect("/settings")
+
+
+def posted_ldap(form) -> dict:
+    current = ldap_auth.public_config()
+    typed_password = bool(str(form.get("ldap_bind_password") or ""))
+    return {
+        "url": str(form.get("ldap_url") or ""),
+        "bind_dn": str(form.get("ldap_bind_dn") or ""),
+        "ous": str(form.get("ldap_ous") or ""),
+        "user_filter": str(form.get("ldap_filter") or ""),
+        "attr_map": str(form.get("ldap_attr_map") or ""),
+        "enabled": str(form.get("ldap_enabled") or "") == "1",
+        "password_set": current["password_set"] or typed_password,
+    }
+
+
+@app.post("/settings/ldap")
+async def settings_ldap(request: Request):
+    form = await request.form()
+    action = str(form.get("action") or "save")
+    notice = ""
+    try:
+        check_csrf(request, str(form.get("csrf") or ""))
+        config = ldap_auth.parse(
+            str(form.get("ldap_url") or ""),
+            str(form.get("ldap_bind_dn") or ""),
+            str(form.get("ldap_bind_password") or ""),
+            str(form.get("ldap_ous") or ""),
+            str(form.get("ldap_filter") or ""),
+            str(form.get("ldap_attr_map") or ""),
+            str(form.get("ldap_enabled") or "") == "1",
+            require_search=action in {"login", "import"},
+        )
+        if action == "test":
+            notice = ldap_auth.test_connection(config)
+        elif action == "login":
+            notice = ldap_auth.test_login(
+                config,
+                str(form.get("ldap_test_user") or ""),
+                str(form.get("ldap_test_password") or ""),
+            )
+        elif action == "import":
+            created, skipped = ldap_auth.import_users(config)
+            notice = f"导入 {created} 个用户，跳过 {skipped} 个。"
+            write_audit(request, "导入 LDAP 用户", notice)
+        else:
+            ldap_auth.store(config)
+            turned_on = bool(config.get("enabled"))
+            write_audit(request, "修改 LDAP", "已启用" if turned_on else "已关闭")
+            flash(request, "LDAP 已启用。除了管理账号，本机密码不能登录。" if turned_on else "LDAP 设置已保存。")
+            return redirect("/settings")
+    except DnsError as exc:
+        context = settings_kwargs(request)
+        context["ldap"] = posted_ldap(form)
+        return render(request, "settings.html", error=exc.message, status_code=400, **context)
+    context = settings_kwargs(request)
+    context["ldap"] = posted_ldap(form)
+    return render(request, "settings.html", notice=notice, **context)
 
 
 @app.post("/settings/password")
@@ -459,6 +524,10 @@ async def settings_password(request: Request):
     password = str(form.get("password") or "")
     confirm = str(form.get("confirm") or "")
     user_id = int(request.session.get("user_id") or 0)
+    user = db.get_user(user_id)
+    if user and user.get("kind") == "ldap":
+        flash(request, "这个账号的密码由 LDAP 管理。", "err")
+        return redirect("/settings")
     if not auth.check_user_password(user_id, current):
         flash(request, "当前密码不正确。", "err")
         return redirect("/settings")

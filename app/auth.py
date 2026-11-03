@@ -36,6 +36,44 @@ def authenticate(username: str, password: str) -> dict | None:
     return {"id": int(user["id"]), "username": user["username"]}
 
 
+def directory_user(profile: dict) -> dict | None:
+    username = str(profile.get("username") or "").strip()
+    if not username or any(ch.isspace() for ch in username) or len(username) > 64:
+        return None
+    existing = db.get_user_by_name(username)
+    if existing:
+        db.update_user_profile(int(existing["id"]), str(profile.get("name") or ""), str(profile.get("email") or ""))
+        return {"id": int(existing["id"]), "username": existing["username"]}
+    salt, digest = hash_password(secrets.token_urlsafe(32))
+    user_id = db.create_user(
+        username,
+        salt,
+        digest,
+        "ldap",
+        str(profile.get("name") or ""),
+        str(profile.get("email") or ""),
+    )
+    return {"id": user_id, "username": username}
+
+
+def login(username: str, password: str) -> dict | None:
+    from app import ldap_auth
+
+    name = username.strip()
+    if not name or not password or any(ch.isspace() for ch in name) or len(name) > 64:
+        return None
+    if not ldap_auth.enabled():
+        return authenticate(name, password)
+    admin_id = db.first_user_id()
+    admin = db.get_user(admin_id) if admin_id else None
+    if admin and admin["username"].lower() == name.lower():
+        return authenticate(name, password)
+    profile = ldap_auth.verify(name, password)
+    if not profile:
+        return None
+    return directory_user(profile)
+
+
 def create_user(username: str, password: str) -> dict:
     salt, digest = hash_password(password)
     user_id = db.create_user(username, salt, digest)

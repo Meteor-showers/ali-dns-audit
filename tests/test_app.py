@@ -1049,3 +1049,144 @@ def test_query_result_shows_where_the_domain_is_used(monkeypatch):
     finally:
         os.environ["DNS_DATA_DIR"] = previous
 
+
+def test_ldap_keeps_admin_password_and_accepts_directory_users(monkeypatch):
+    previous = os.environ["DNS_DATA_DIR"]
+    os.environ["DNS_DATA_DIR"] = tempfile.mkdtemp(prefix="dns-ldap-")
+    try:
+        from app import db
+
+        with TestClient(app) as client:
+            setup = client.get("/setup")
+            client.post(
+                "/setup",
+                data={"csrf": csrf_from(setup), "username": "admin", "password": "secret1", "confirm": "secret1"},
+                follow_redirects=False,
+            )
+            settings = client.get("/settings")
+            client.post(
+                "/settings/users",
+                data={"csrf": csrf_from(settings), "username": "local", "password": "secret2", "confirm": "secret2"},
+                follow_redirects=False,
+            )
+            settings = client.get("/settings")
+            saved = client.post(
+                "/settings/ldap",
+                data={
+                    "csrf": csrf_from(settings),
+                    "action": "save",
+                    "ldap_url": "ldaps://ldap.example.com",
+                    "ldap_ous": "ou=一部门,dc=example,dc=com | ou=二部门,dc=example,dc=com",
+                    "ldap_bind_dn": "cn=reader,dc=example,dc=com",
+                    "ldap_bind_password": "bind-secret",
+                    "ldap_filter": "(sAMAccountName=%(user)s)",
+                    "ldap_attr_map": '{"username": "sAMAccountName", "name": "cn", "email": "mail"}',
+                    "ldap_enabled": "1",
+                },
+                follow_redirects=False,
+            )
+            assert saved.status_code == 303
+            page = client.get("/settings")
+            assert "bind-secret" not in page.text
+            assert "已保存，留空不修改" in page.text
+            assert "LDAP 已启用" not in page.text or "除了管理账号" in page.text
+
+            def fake_verify(username, password):
+                if username == "alice" and password == "dir-secret":
+                    return {"username": "alice", "name": "Alice", "email": "alice@example.com"}
+                return None
+
+            monkeypatch.setattr("app.ldap_auth.verify", fake_verify)
+            client.post("/logout", data={"csrf": csrf_from(page)}, follow_redirects=False)
+            admin_login = client.post(
+                "/login",
+                data={"csrf": csrf_from(client.get("/login")), "username": "admin", "password": "secret1"},
+                follow_redirects=False,
+            )
+            assert admin_login.status_code == 303
+            client.post("/logout", data={"csrf": csrf_from(client.get("/"))}, follow_redirects=False)
+            local_login = client.post(
+                "/login",
+                data={"csrf": csrf_from(client.get("/login")), "username": "local", "password": "secret2"},
+                follow_redirects=False,
+            )
+            assert local_login.status_code == 400
+            alice = client.post(
+                "/login",
+                data={"csrf": csrf_from(client.get("/login")), "username": "alice", "password": "dir-secret"},
+                follow_redirects=False,
+            )
+            assert alice.status_code == 303
+            assert db.get_user_by_name("alice")["kind"] == "ldap"
+            home = client.get("/settings")
+            assert "LDAP" in home.text
+            assert "由 LDAP 管理" in home.text
+            client.post("/logout", data={"csrf": csrf_from(home)}, follow_redirects=False)
+            denied = client.post(
+                "/login",
+                data={"csrf": csrf_from(client.get("/login")), "username": "bob", "password": "nope"},
+                follow_redirects=False,
+            )
+            assert denied.status_code == 400
+            client.post(
+                "/login",
+                data={"csrf": csrf_from(client.get("/login")), "username": "admin", "password": "secret1"},
+                follow_redirects=False,
+            )
+
+            def fake_collect(config, search_filter):
+                assert search_filter == "(sAMAccountName=*)"
+                assert config["ous"] == ["ou=一部门,dc=example,dc=com", "ou=二部门,dc=example,dc=com"]
+                return [
+                    {"username": "carol", "name": "Carol", "email": "carol@example.com"},
+                    {"username": "admin", "name": "管理员", "email": ""},
+                ]
+
+            monkeypatch.setattr("app.ldap_auth._collect", fake_collect)
+            imported = client.post(
+                "/settings/ldap",
+                data={
+                    "csrf": csrf_from(client.get("/settings")),
+                    "action": "import",
+                    "ldap_url": "ldaps://ldap.example.com",
+                    "ldap_ous": "ou=一部门,dc=example,dc=com | ou=二部门,dc=example,dc=com",
+                    "ldap_bind_dn": "cn=reader,dc=example,dc=com",
+                    "ldap_bind_password": "",
+                    "ldap_filter": "(sAMAccountName=%(user)s)",
+                    "ldap_attr_map": '{"username": "sAMAccountName", "name": "cn", "email": "mail"}',
+                    "ldap_enabled": "1",
+                },
+            )
+            assert imported.status_code == 200
+            assert "导入 1 个用户，跳过 1 个。" in imported.text
+            assert "bind-secret" not in imported.text
+            carol = db.get_user_by_name("carol")
+            assert carol["kind"] == "ldap"
+            assert carol["display_name"] == "Carol"
+            assert carol["email"] == "carol@example.com"
+            turned_off = client.post(
+                "/settings/ldap",
+                data={
+                    "csrf": csrf_from(client.get("/settings")),
+                    "action": "save",
+                    "ldap_url": "",
+                    "ldap_ous": "",
+                    "ldap_bind_dn": "",
+                    "ldap_bind_password": "",
+                    "ldap_filter": "",
+                    "ldap_attr_map": "",
+                },
+                follow_redirects=False,
+            )
+            assert turned_off.status_code == 303
+            assert db.get_setting("ldap_bind_password") == ""
+            client.post("/logout", data={"csrf": csrf_from(client.get("/"))}, follow_redirects=False)
+            local_again = client.post(
+                "/login",
+                data={"csrf": csrf_from(client.get("/login")), "username": "local", "password": "secret2"},
+                follow_redirects=False,
+            )
+            assert local_again.status_code == 303
+    finally:
+        os.environ["DNS_DATA_DIR"] = previous
+

@@ -329,6 +329,8 @@ h2 { margin: 0 0 12px; font-size: 15px; }
 .toolbar, .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
 label { display: block; margin-bottom: 14px; }
+label.check { display: flex; align-items: center; gap: 8px; }
+label.check span { margin: 0; }
 label span { display: block; margin-bottom: 6px; color: #374151; font-size: 13px; font-weight: 600; }
 input[type="text"], input[type="password"], input[type="number"], input[type="search"], select, textarea {
   width: 100%;
