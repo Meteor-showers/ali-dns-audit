@@ -744,3 +744,308 @@ def test_godaddy_replaces_one_value_and_hides_status_switch():
     finally:
         os.environ["DNS_DATA_DIR"] = previous
 
+
+def test_query_result_shows_where_the_domain_is_used(monkeypatch):
+    from datetime import datetime, timedelta
+
+    from app.dns.products import covers, domain_listed, find_usage, hints_for, oss_cnames, usage_phrase
+
+    assert covers("wb.xiu361.cn", "wb.xiu361.cn")
+    assert covers("*.xiu361.cn", "wb.xiu361.cn")
+    assert not covers("*.xiu361.cn", "a.wb.xiu361.cn")
+    assert hints_for("wb.xiu361.cn.w.kunlunsl.com") == {"accelerate"}
+    assert hints_for("img.oss-cn-hangzhou.aliyuncs.com") == {"oss"}
+    assert hints_for("alb-xxx.cn-hangzhou.alb.aliyuncsslb.com") == {"alb"}
+    assert hints_for("1.2.3.4") == set()
+    from app import db as usage_db
+    from app.dns.products import (
+        ACCELERATE,
+        _account_id,
+        _in_zone,
+        catalogs_for,
+        fingerprint,
+        labels_for_name,
+        load_usages,
+    )
+
+    catalog = {"全站加速": {"service.haixiutv.com"}, "CDN": {"csservice.haixiutv.com"}}
+    assert labels_for_name("service.haixiutv.com", catalog) == ["全站加速"]
+    assert labels_for_name("csservice.haixiutv.com", catalog) == ["CDN"]
+    assert _in_zone("csservice.haixiutv.com", "haixiutv.com")
+    assert _in_zone("*.haixiutv.com", "haixiutv.com")
+    assert not _in_zone("nothaixiutv.com", "haixiutv.com")
+    usage_db.write_usage("empty.example", "fp", "")
+    usage_db.write_usage("hit.example", "fp", "在秀色的 CDN 使用")
+    with usage_db.connect() as conn:
+        recent = (datetime.now() - timedelta(minutes=30)).isoformat(timespec="seconds")
+        stale_miss = (datetime.now() - timedelta(hours=2)).isoformat(timespec="seconds")
+        conn.execute("UPDATE usage_cache SET checked_at = ? WHERE fqdn = ?", (recent, "empty.example"))
+        conn.execute("UPDATE usage_cache SET checked_at = ? WHERE fqdn = ?", (stale_miss, "hit.example"))
+    assert usage_db.read_usage("empty.example", "fp") == ""
+    with usage_db.connect() as conn:
+        conn.execute("UPDATE usage_cache SET checked_at = ? WHERE fqdn = ?", (stale_miss, "empty.example"))
+    assert usage_db.read_usage("empty.example", "fp") is None
+    assert usage_db.read_usage("hit.example", "fp") == "在秀色的 CDN 使用"
+
+    def fake_call(key, secret, endpoint, version, action, extra, proxy):
+        return {
+            "TotalCount": 2,
+            "Domains": {"PageData": [{"DomainName": "csservice.haixiutv.com"}, {"DomainName": "nothaixiutv.com"}]},
+        }
+
+    monkeypatch.setattr("app.dns.products._call", fake_call)
+    from app.dns.products import _list_suffix
+
+    label, names, state, complete = _list_suffix("k", "s", None, "haixiutv.com", ACCELERATE[0])
+    assert label == "CDN"
+    assert names == {"csservice.haixiutv.com"}
+    assert state == "ok" and complete is True
+
+    list_calls = {"n": 0}
+
+    def fake_list(key, secret, proxy, zone, spec):
+        list_calls["n"] += 1
+        label_name = spec[0]
+        if key == "bad":
+            return label_name, set(), "auth", False
+        if key == "deny":
+            return label_name, set(), "deny", False
+        if zone == "partial.example":
+            return label_name, set(), "ok", False
+        names = set()
+        if label_name == "全站加速":
+            names.add(f"service.{zone}")
+        elif label_name == "CDN":
+            names.add(f"csservice.{zone}")
+        return label_name, names, "ok", True
+
+    monkeypatch.setattr("app.dns.products._list_suffix", fake_list)
+    show = [({"id": 3, "name": "瞬秀", "access_key": "k", "secret_key": "s"}, None)]
+    many = load_usages(
+        show,
+        "haixiutv.com",
+        [
+            {"host": "service", "type": "CNAME", "value": "service.haixiutv.com.w.kunluncan.com", "status": "ENABLE"},
+            {"host": "csservice", "type": "CNAME", "value": "csservice.haixiutv.com.w.cdngslb.com", "status": "ENABLE"},
+            {"host": "inner-t2-service", "type": "A", "value": "192.168.84.57", "status": "ENABLE"},
+        ],
+    )
+    assert many["service"] == "在瞬秀的 全站加速 使用"
+    assert many["csservice"] == "在瞬秀的 CDN 使用"
+    assert many["inner-t2-service"] == ""
+    assert list_calls["n"] == 4
+    other = load_usages(
+        show,
+        "haixiutv.com",
+        [{"host": "h5service", "type": "CNAME", "value": "h5service.haixiutv.com.w.kunluncan.com", "status": "ENABLE"}],
+    )
+    assert other["h5service"] == ""
+    assert list_calls["n"] == 4
+    h5_fp = fingerprint(["h5service.haixiutv.com.w.kunluncan.com"], show)
+    assert usage_db.read_usage("h5service.haixiutv.com", h5_fp) == ""
+    assert load_usages(
+        show,
+        "haixiutv.com",
+        [{"host": "service", "type": "CNAME", "value": "service.haixiutv.com.w.kunluncan.com", "status": "ENABLE"}],
+    )["service"] == "在瞬秀的 全站加速 使用"
+    assert list_calls["n"] == 4
+    partial_rows = [
+        {"host": "service", "type": "CNAME", "value": "service.partial.example.w.kunluncan.com", "status": "ENABLE"}
+    ]
+    assert load_usages(show, "partial.example", partial_rows)["service"] == ""
+    partial_fp = fingerprint(["service.partial.example.w.kunluncan.com"], show)
+    assert usage_db.read_usage("service.partial.example", partial_fp) is None
+    assert load_usages(show, "partial.example", partial_rows)["service"] == ""
+    assert list_calls["n"] == 8
+    mixed = [
+        ({"id": 11, "name": "瞬秀", "access_key": "good", "secret_key": "s"}, None),
+        ({"id": 12, "name": "秀色", "access_key": "bad", "secret_key": "s"}, None),
+    ]
+    mixed_rows = [
+        {"host": "service", "type": "CNAME", "value": "service.mix.example.w.kunluncan.com", "status": "ENABLE"}
+    ]
+    assert load_usages(mixed, "mix.example", mixed_rows)["service"] == "在瞬秀的 全站加速 使用"
+    mixed_fp = fingerprint(["service.mix.example.w.kunluncan.com"], mixed)
+    assert usage_db.read_usage("service.mix.example", mixed_fp) is None
+    denied = [({"id": 13, "name": "瞬秀", "access_key": "deny", "secret_key": "s"}, None)]
+    denied_rows = [
+        {"host": "service", "type": "CNAME", "value": "service.deny.example.w.kunluncan.com", "status": "ENABLE"}
+    ]
+    assert load_usages(denied, "deny.example", denied_rows)["service"] == "没有权限"
+    oss_calls = []
+
+    def fake_oss(key, secret, proxy, value):
+        oss_calls.append(value)
+        return True, "ok"
+
+    monkeypatch.setattr("app.dns.products._confirm_oss", fake_oss)
+    oss_account = [({"id": 14, "name": "瞬秀", "access_key": "k", "secret_key": "s"}, None)]
+    oss_found = load_usages(
+        oss_account,
+        "oss.example",
+        [
+            {"host": "img", "type": "CNAME", "value": "img.oss-cn-hangzhou.aliyuncs.com", "status": "ENABLE"},
+            {"host": "img2", "type": "CNAME", "value": "img.oss-cn-hangzhou.aliyuncs.com", "status": "ENABLE"},
+            {"host": "video", "type": "CNAME", "value": "video.oss-cn-hangzhou.aliyuncs.com", "status": "ENABLE"},
+        ],
+    )
+    assert oss_found["img"] == "在瞬秀的 OSS 使用"
+    assert oss_found["img2"] == "在瞬秀的 OSS 使用"
+    assert oss_found["video"] == "在瞬秀的 OSS 使用"
+    assert sorted(oss_calls) == ["img.oss-cn-hangzhou.aliyuncs.com", "video.oss-cn-hangzhou.aliyuncs.com"]
+    import threading
+    import time
+
+    started = threading.Event()
+    release = threading.Event()
+    flight_calls = {"n": 0}
+
+    def slow_list(key, secret, proxy, zone, spec):
+        flight_calls["n"] += 1
+        started.set()
+        assert release.wait(2)
+        return spec[0], set(), "ok", True
+
+    monkeypatch.setattr("app.dns.products._list_suffix", slow_list)
+    flight_accounts = [({"id": 15, "name": "飞行", "access_key": "k", "secret_key": "s"}, None)]
+    flights = []
+
+    def run_flight():
+        flights.append(catalogs_for(flight_accounts, "flight.example"))
+
+    first = threading.Thread(target=run_flight)
+    first.start()
+    assert started.wait(2)
+    second = threading.Thread(target=run_flight)
+    second.start()
+    time.sleep(0.1)
+    release.set()
+    first.join(2)
+    second.join(2)
+    assert flight_calls["n"] == 4
+    assert len(flights) == 2
+    assert _account_id({"id": 15, "name": "飞行"}) == "15"
+    assert usage_phrase([("秀色", "全站加速"), ("秀色", "CDN")]) == "在秀色的 CDN、全站加速 使用"
+    assert domain_listed({"Domains": {"PageData": [{"DomainName": "wb.xiu361.cn"}]}}, "wb.xiu361.cn")
+    assert oss_cnames("<ListCnameResult><Cname><Domain>wb.xiu361.cn</Domain></Cname></ListCnameResult>") == [
+        "wb.xiu361.cn"
+    ]
+    calls = {"n": 0}
+
+    def fake_account(site, proxy, domain, values):
+        calls["n"] += 1
+        return [(site["name"], "CDN")], "ok"
+
+    monkeypatch.setattr("app.dns.products._account", fake_account)
+    accounts = [({"id": 7, "name": "秀色", "access_key": "k", "secret_key": "s"}, None)]
+    values = ["wb.xiu361.cn.w.kunlunsl.com"]
+    assert find_usage(accounts, "wb.xiu361.cn", values) == "在秀色的 CDN 使用"
+    assert find_usage(accounts, "wb.xiu361.cn", values) == "在秀色的 CDN 使用"
+    assert calls["n"] == 1
+    assert find_usage(accounts, "wb.xiu361.cn", ["1.2.3.4"]) == ""
+    assert calls["n"] == 1
+    from app import db as usage_db
+
+    old = (datetime.now() - timedelta(hours=25)).isoformat(timespec="seconds")
+    with usage_db.connect() as conn:
+        conn.execute("UPDATE usage_cache SET checked_at = ? WHERE fqdn = ?", (old, "wb.xiu361.cn"))
+    assert find_usage(accounts, "wb.xiu361.cn", values) == "在秀色的 CDN 使用"
+    assert calls["n"] == 2
+    seen = {}
+
+    def fake_load(accounts, zone, records):
+        seen["hosts"] = [row["host"] for row in records]
+        seen["sites"] = [item[0]["name"] for item in accounts]
+        return {row["host"].lower(): "在秀色的 CDN 使用" for row in records}
+
+    monkeypatch.setattr("app.main.load_usages", fake_load)
+    previous = os.environ["DNS_DATA_DIR"]
+    os.environ["DNS_DATA_DIR"] = tempfile.mkdtemp(prefix="dns-usage-")
+    try:
+        from app import db
+
+        with TestClient(app) as client:
+            setup = client.get("/setup")
+            client.post(
+                "/setup",
+                data={"csrf": csrf_from(setup), "username": "ops", "password": "secret1", "confirm": "secret1"},
+                follow_redirects=False,
+            )
+            new_page = client.get("/sites/new")
+            client.post(
+                "/sites",
+                data={
+                    "csrf": csrf_from(new_page),
+                    "name": "秀色",
+                    "provider": "aliyun",
+                    "access_key": "LTAIexample",
+                    "secret_key": "secret-value",
+                    "proxy": "",
+                    "remark": "",
+                },
+                follow_redirects=False,
+            )
+            new_page = client.get("/sites/new")
+            client.post(
+                "/sites",
+                data={
+                    "csrf": csrf_from(new_page),
+                    "name": "DNSPod站",
+                    "provider": "dnspod",
+                    "access_key": "10001",
+                    "secret_key": "token-value",
+                    "proxy": "",
+                    "remark": "",
+                },
+                follow_redirects=False,
+            )
+            site = [item for item in db.list_sites() if item["name"] == "秀色"][0]
+            db.replace_zones(site["id"], [{"domain": "xiu361.cn", "record_count": 1}])
+            db.replace_records(
+                site["id"],
+                "xiu361.cn",
+                [{
+                    "id": "wb",
+                    "host": "wb",
+                    "type": "CNAME",
+                    "value": "wb.xiu361.cn.w.kunlunsl.com",
+                    "ttl": 600,
+                    "line": "default",
+                    "priority": None,
+                    "status": "ENABLE",
+                }],
+            )
+            page = client.get(
+                "/zone",
+                params={"site_id": site["id"], "domain": "xiu361.cn", "q": "wb.xiu361.cn", "rq": "wb"},
+            )
+            assert page.status_code == 200
+            assert "使用位置" in page.text
+            assert "正在查询" in page.text
+            assert "if (!res.ok)" in page.text
+            assert "wb.xiu361.cn.w.kunlunsl.com" in page.text
+            assert seen == {}
+            looked = client.get(
+                "/zone/usage",
+                params={"site_id": site["id"], "domain": "xiu361.cn", "q": "wb.xiu361.cn"},
+            )
+            assert looked.status_code == 200
+            assert looked.json()["items"]["wb"] == "在秀色的 CDN 使用"
+            assert looked.json()["phrase"] == "在秀色的 CDN 使用"
+            assert seen["hosts"] == ["wb"]
+            assert seen["sites"] == ["秀色"]
+            assert "secret-value" not in page.text
+            assert "secret-value" not in looked.text
+            plain = client.get("/zone", params={"site_id": site["id"], "domain": "xiu361.cn"})
+            assert "使用位置" not in plain.text
+        with TestClient(app) as guest:
+            guest_page = guest.get(
+                "/zone",
+                params={"site_id": site["id"], "domain": "xiu361.cn", "q": "wb.xiu361.cn"},
+            )
+            assert guest_page.status_code == 200
+            assert "使用位置" in guest_page.text
+            assert "正在查询" in guest_page.text
+    finally:
+        os.environ["DNS_DATA_DIR"] = previous
+

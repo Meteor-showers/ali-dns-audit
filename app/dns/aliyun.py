@@ -32,11 +32,20 @@ def sign(params: dict, secret: str) -> str:
     return base64.b64encode(digest).decode("utf-8")
 
 
-def call(access_key: str, secret: str, action: str, extra: dict, proxy: str | None) -> dict:
+def rpc(
+    access_key: str,
+    secret: str,
+    endpoint: str,
+    version: str,
+    action: str,
+    extra: dict,
+    proxy: str | None,
+    timeout: float = 30.0,
+) -> dict:
     params = {
         "Action": action,
         "Format": "JSON",
-        "Version": API_VERSION,
+        "Version": version,
         "AccessKeyId": access_key,
         "SignatureMethod": "HMAC-SHA1",
         "SignatureVersion": "1.0",
@@ -48,15 +57,26 @@ def call(access_key: str, secret: str, action: str, extra: dict, proxy: str | No
     query = "&".join(
         f"{percent_encode(key)}={percent_encode(params[key])}" for key in sorted(params)
     )
-    response = request("GET", ENDPOINT + "?" + query, proxy=proxy, headers={"Accept": "application/json"})
+    response = request(
+        "GET",
+        endpoint.rstrip("/") + "/?" + query,
+        proxy=proxy,
+        timeout=timeout,
+        headers={"Accept": "application/json"},
+    )
     try:
         payload = response.json()
     except json.JSONDecodeError as exc:
-        raise DnsError("阿里云 DNS 返回了无法解析的内容。", response.text[:300]) from exc
-    if "Code" in payload:
-        detail = f"{payload.get('Code')}: {payload.get('Message', '')}"
+        raise DnsError("阿里云返回了无法解析的内容。", response.text[:300]) from exc
+    code = str(payload.get("Code") or "")
+    if code and code.lower() not in {"ok", "200", "success"}:
+        detail = f"{code}: {payload.get('Message', '')}"
         raise DnsError(detail, detail)
     return payload
+
+
+def call(access_key: str, secret: str, action: str, extra: dict, proxy: str | None) -> dict:
+    return rpc(access_key, secret, ENDPOINT, API_VERSION, action, extra, proxy)
 
 
 def _as_list(value) -> list:

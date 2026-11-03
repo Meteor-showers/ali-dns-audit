@@ -14,6 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app import auth, db
 from app.log import configure_logging
 from app.dns.errors import DnsError
+from app.dns.products import load_usages, preview_usages
 from app.dns.scheduler import scheduler
 from app.dns.service import (
     PROVIDERS,
@@ -35,6 +36,7 @@ from app.dns.service import (
     parse_record,
     probe_site,
     provider_label,
+    proxy_for,
     plain_dns,
     relative_host,
     sync_all,
@@ -258,7 +260,7 @@ def ns_view(zone: dict, updating: bool = False) -> dict:
 def guest_allowed(path: str, method: str) -> bool:
     if method == "POST":
         return path == "/login"
-    if path in {"/", "/search", "/login", "/zone", "/zone/live", "/sites/live"}:
+    if path in {"/", "/search", "/login", "/zone", "/zone/live", "/zone/usage", "/sites/live"}:
         return True
     parts = [part for part in path.split("/") if part]
     return len(parts) == 3 and parts[0] == "sites" and parts[1].isdigit() and parts[2] in {"domains", "live"}
@@ -763,6 +765,35 @@ async def check_ns_route(request: Request, site_id: int):
     return redirect(f"/sites/{site_id}/domains")
 
 
+def aliyun_accounts() -> list[tuple[dict, str | None]]:
+    return [(item, proxy_for(item)) for item in db.list_sites() if item["provider"] == "aliyun"]
+
+
+@app.get("/zone/usage")
+def zone_usage(
+    request: Request,
+    site_id: int,
+    domain: str,
+    q: str = "",
+    rq: str = "",
+    page: int = 1,
+    size: int = 0,
+):
+    site = db.get_site(site_id)
+    zone = db.get_zone(site_id, domain) if site else None
+    if not site or not zone:
+        return JSONResponse({"items": {}}, status_code=404)
+    page_size = choose_page_size(request, size)
+    records, _total, _page, _pages = db.query_records(site_id, domain, rq, page, page_size)
+    try:
+        found = load_usages(aliyun_accounts(), domain, records)
+    except Exception:
+        found = {}
+    items = {host: phrase or "—" for host, phrase in found.items()}
+    usage_host = relative_host(q, domain) if q.strip() else ""
+    return JSONResponse({"items": items, "phrase": items.get(usage_host) or "—"})
+
+
 @app.get("/zone")
 def zone_page(request: Request, site_id: int, domain: str, q: str = "", rq: str = "", page: int = 1, size: int = 0, focus: str = ""):
     site = db.get_site(site_id)
@@ -788,6 +819,9 @@ def zone_page(request: Request, site_id: int, domain: str, q: str = "", rq: str 
         if item["domain"].lower() == domain.lower() and item["site_id"] != site_id
     ]
     records, total, page, pages = db.query_records(site_id, domain, rq, page, page_size)
+    show_usage = bool(q.strip() or rq.strip())
+    usages, usage_pending_hosts = preview_usages(aliyun_accounts(), domain, records) if show_usage else ({}, {})
+    usage_pending = any(usage_pending_hosts.values())
     return render(
         request,
         "zone.html",
@@ -806,6 +840,21 @@ def zone_page(request: Request, site_id: int, domain: str, q: str = "", rq: str 
         pages=pages,
         page_size=page_size,
         highlight=rq.strip(),
+        show_usage=show_usage,
+        usages=usages,
+        usage_pending_hosts=usage_pending_hosts,
+        usage_pending=usage_pending,
+        usage_url="/zone/usage?"
+        + urlencode(
+            {
+                "site_id": str(site_id),
+                "domain": domain,
+                "q": q,
+                "rq": rq,
+                "page": str(page),
+                "size": str(page_size),
+            }
+        ),
         focus=focus,
         record_error=error,
         detail=detail,

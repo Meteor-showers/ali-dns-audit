@@ -23,9 +23,9 @@ def effective_proxy(site: dict, global_proxy: str) -> str | None:
     return chosen or None
 
 
-def request(method: str, url: str, proxy: str | None = None, **kwargs) -> httpx.Response:
+def request(method: str, url: str, proxy: str | None = None, timeout: float = 30.0, **kwargs) -> httpx.Response:
     try:
-        with httpx.Client(proxy=proxy or None, timeout=30.0) as client:
+        with httpx.Client(proxy=proxy or None, timeout=timeout) as client:
             return client.request(method, url, **kwargs)
     except httpx.ProxyError as exc:
         raise DnsError("代理连接失败，请检查代理地址。", str(exc)) from exc

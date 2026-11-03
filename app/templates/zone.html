@@ -64,7 +64,7 @@
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>主机</th><th>类型</th><th>线路</th><th>记录值</th><th>TTL</th><th>优先级</th><th>创建时间</th><th>更新时间</th><th>状态</th>{% if signed_in %}<th class="row-actions">操作</th>{% endif %}</tr>
+        <tr><th>主机</th><th>类型</th><th>线路</th><th>记录值</th>{% if show_usage %}<th>使用位置</th>{% endif %}<th>TTL</th><th>优先级</th><th>创建时间</th><th>更新时间</th><th>状态</th>{% if signed_in %}<th class="row-actions">操作</th>{% endif %}</tr>
       </thead>
       <tbody>
         {% for item in records %}
@@ -87,6 +87,10 @@
             </div>
             {% endif %}
           </td>
+          {% if show_usage %}
+          {% set host_key = item.host|lower %}
+          <td class="usage-cell{% if usage_pending_hosts.get(host_key) %} muted{% endif %}" data-host="{{ host_key }}">{% if usage_pending_hosts.get(host_key) %}正在查询{% else %}{{ usages.get(host_key) or "—" }}{% endif %}</td>
+          {% endif %}
           <td class="num">
             <span class="shown">{{ item.ttl }}</span>
             {% if signed_in %}<input class="editor" form="edit-{{ item.id }}" type="number" name="ttl" min="{{ 600 if site.provider == 'godaddy' else 1 }}" max="86400" value="{{ item.ttl }}" aria-label="TTL">{% endif %}
@@ -203,5 +207,34 @@ document.querySelectorAll("button.row-cancel").forEach(function (btn) {
     btn.closest("tr").classList.remove("editing");
   });
 });
+{% if usage_pending %}
+fetch({{ usage_url|tojson }}, {headers: {Accept: "application/json"}})
+  .then(function (res) {
+    if (!res.ok) throw new Error("usage");
+    return res.json();
+  })
+  .then(function (data) {
+    var items = data.items || {};
+    document.querySelectorAll(".usage-cell").forEach(function (cell) {
+      var host = cell.getAttribute("data-host");
+      var pending = cell.classList.contains("muted");
+      if (host && Object.prototype.hasOwnProperty.call(items, host)) {
+        cell.textContent = items[host] || "—";
+        cell.classList.remove("muted");
+        return;
+      }
+      if (pending) {
+        cell.textContent = "查询失败";
+        cell.classList.remove("muted");
+      }
+    });
+  })
+  .catch(function () {
+    document.querySelectorAll(".usage-cell.muted").forEach(function (cell) {
+      cell.textContent = "查询失败";
+      cell.classList.remove("muted");
+    });
+  });
+{% endif %}
 </script>
 {% endblock %}

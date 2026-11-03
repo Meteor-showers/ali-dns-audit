@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -91,6 +91,24 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_id ON audit_logs(id);
+
+CREATE TABLE IF NOT EXISTS usage_cache (
+    fqdn TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    phrase TEXT NOT NULL,
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY (fqdn, fingerprint)
+);
+
+CREATE TABLE IF NOT EXISTS usage_catalog (
+    account_id TEXT NOT NULL,
+    zone TEXT NOT NULL,
+    product TEXT NOT NULL,
+    names TEXT NOT NULL,
+    complete INTEGER NOT NULL,
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY (account_id, zone, product)
+);
 """
 
 _ready: set[str] = set()
@@ -637,6 +655,102 @@ def _record(row: sqlite3.Row) -> dict:
     item = dict(row)
     item["id"] = item.pop("record_id")
     return item
+
+
+def host_targets(site_id: int, domain: str, host: str) -> list[str]:
+    names = [host]
+    if host not in {"@", "*"}:
+        names.append("*")
+    marks = ",".join("?" for _ in names)
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT host, type, value, status FROM records
+            WHERE site_id = ? AND domain = ? AND lower(host) IN ({marks})
+            """,
+            [site_id, domain, *[item.lower() for item in names]],
+        ).fetchall()
+    exact = []
+    wildcard = []
+    for row in rows:
+        if (row["type"] or "").upper() not in {"A", "AAAA", "CNAME"}:
+            continue
+        value = (row["value"] or "").strip()
+        if not value:
+            continue
+        enabled = (row["status"] or "").strip().lower() in {"", "enable", "1"}
+        bucket = exact if (row["host"] or "").lower() == host.lower() else wildcard
+        bucket.append((enabled, value))
+    chosen = exact or wildcard
+    enabled_values = [value for enabled, value in chosen if enabled]
+    values = enabled_values or [value for _, value in chosen]
+    return list(dict.fromkeys(values))
+
+
+def read_usage(fqdn: str, fingerprint: str) -> str | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT phrase, checked_at FROM usage_cache WHERE fqdn = ? AND fingerprint = ?",
+            (fqdn, fingerprint),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        checked = datetime.fromisoformat(row["checked_at"])
+    except ValueError:
+        return None
+    limit = timedelta(hours=1) if row["phrase"] == "" else timedelta(hours=24)
+    if datetime.now() - checked > limit:
+        return None
+    return row["phrase"]
+
+
+def write_usage(fqdn: str, fingerprint: str, phrase: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO usage_cache(fqdn, fingerprint, phrase, checked_at)
+            VALUES(?, ?, ?, ?)
+            ON CONFLICT(fqdn, fingerprint) DO UPDATE SET phrase = excluded.phrase, checked_at = excluded.checked_at
+            """,
+            (fqdn, fingerprint, phrase, now()),
+        )
+
+
+def read_catalog(account_id: str, zone: str, product: str) -> tuple[set[str], bool] | None:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT names, complete, checked_at FROM usage_catalog
+            WHERE account_id = ? AND zone = ? AND product = ?
+            """,
+            (account_id, zone, product),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        checked = datetime.fromisoformat(row["checked_at"])
+    except ValueError:
+        return None
+    if datetime.now() - checked > timedelta(minutes=30):
+        return None
+    names = {item for item in (row["names"] or "").split("\n") if item}
+    return names, bool(row["complete"])
+
+
+def write_catalog(account_id: str, zone: str, product: str, names: set[str], complete: bool) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO usage_catalog(account_id, zone, product, names, complete, checked_at)
+            VALUES(?, ?, ?, ?, ?, ?)
+            ON CONFLICT(account_id, zone, product) DO UPDATE SET
+                names = excluded.names,
+                complete = excluded.complete,
+                checked_at = excluded.checked_at
+            """,
+            (account_id, zone, product, "\n".join(sorted(names)), 1 if complete else 0, now()),
+        )
 
 
 def update_zone_ns(site_id: int, domain: str, public: str, location: str, provider: str) -> None:
