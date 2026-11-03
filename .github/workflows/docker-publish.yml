@@ -3,6 +3,8 @@ name: 发布镜像
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - ".github/**"
     tags:
       - "v[0-9]*"
       - "!v*alpha*"
