@@ -1,0 +1,109 @@
+name: 更新镜像简介
+
+on:
+  workflow_dispatch:
+
+jobs:
+  describe:
+    runs-on: ubuntu-26.04
+    environment: DOCKERHUB
+    steps:
+      - name: 更新 Docker Hub 简介
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import textwrap
+          import urllib.error
+          import urllib.request
+
+          username = os.environ["DOCKERHUB_USERNAME"]
+          password = os.environ["DOCKERHUB_TOKEN"]
+          short = "网页上统一查看和修改域名解析，并显示 CDN、全站加速等使用位置。"
+          full = textwrap.dedent("""\
+          网页上统一查看和修改域名解析。支持阿里云、腾讯云 DNSPod、DNSPod Token、Wix 和 GoDaddy。密钥只保存在挂载的数据目录里，不会写进镜像。
+
+          镜像是 linux/amd64，用于 x86_64 的机器。Ubuntu、Debian、CentOS，以及安装了 Docker 的 Windows、Intel Mac 都可以运行。
+
+          ## 启动
+
+          在空目录放一份 `docker-compose.yml`：
+
+          ```yaml
+          services:
+            dns-console:
+              image: plutosdocker/ali-dns-audit:latest
+              ports:
+                - "8080:8080"
+              volumes:
+                - ./data:/app/data
+              restart: unless-stopped
+          ```
+
+          然后执行：
+
+          ```bash
+          docker compose pull
+          docker compose up -d
+          ```
+
+          浏览器打开 `http://服务器地址:8080`。第一次打开时创建用户名和密码。
+
+          ## 怎么用
+
+          1. 登录后打开「平台」，添加阿里云、腾讯云 DNSPod、DNSPod Token、Wix 或 GoDaddy。密钥填在页面上，保存在 `./data`。
+          2. 某个平台需要代理时，在该平台上填写；也可以在设置里填一个全局代理。
+          3. 在首页搜索主域名或子域名，会打开公网正在使用的那一份解析。
+          4. 可以添加、修改、删除解析。阿里云和腾讯云可以启用或停止单条记录。Wix 和 GoDaddy 没有线路、备注，也不能单独停止一条记录。
+          5. 不登录也可以搜索和查看记录，不能修改，也看不到平台列表。
+          6. 搜索子域名后，记录值后面会显示它在阿里云的 CDN、全站加速、直播、点播、OSS 或负载均衡里的使用位置。不登录也能看到。普通 A 记录没有这一项。
+
+          ## 数据
+
+          `./data` 里是数据库和登录状态。升级或重建容器时保留这个目录。`docker compose pull` 后再 `up -d` 只换镜像，不会清空已有平台、解析和登录账号。新版本只在原来的数据库里补表。删掉 `./data` 才会清空已添加的平台和账号。
+
+          ## 更新
+
+          ```bash
+          docker compose pull
+          docker compose up -d
+          ```
+
+          ## 源码
+
+          https://github.com/Meteor-showers/ali-dns-audit
+          """
+
+          def call(url, payload, method=None, token=None):
+              data = json.dumps(payload).encode()
+              headers = {"Content-Type": "application/json"}
+              if token:
+                  headers["Authorization"] = f"JWT {token}"
+              request = urllib.request.Request(url, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(request, timeout=60) as response:
+                      return response.status, json.load(response)
+              except urllib.error.HTTPError as exc:
+                  raise SystemExit(f"http {exc.code}") from None
+
+          status, login = call(
+              "https://hub.docker.com/v2/users/login/",
+              {"username": username, "password": password},
+          )
+          token = login.get("token") or ""
+          if not token:
+              raise SystemExit(f"login status {status} without token")
+          status, payload = call(
+              "https://hub.docker.com/v2/repositories/plutosdocker/ali-dns-audit/",
+              {"description": short, "full_description": full},
+              method="PATCH",
+              token=token,
+          )
+          text = payload.get("full_description") or ""
+          print(status)
+          print(payload.get("description"))
+          print("mentions", "GoDaddy" in text, "使用位置" in text, "不会清空" in text)
+          PY
