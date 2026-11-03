@@ -6,6 +6,12 @@ from datetime import datetime, timedelta, timezone
 
 # 中国不实行夏令时，上海时间固定为 UTC+8。
 SHANGHAI = timezone(timedelta(hours=8))
+
+
+def shanghai_now() -> datetime:
+    return datetime.now(SHANGHAI).replace(tzinfo=None)
+
+
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 

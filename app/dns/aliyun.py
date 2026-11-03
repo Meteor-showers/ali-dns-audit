@@ -50,6 +50,7 @@ def rpc(
         "SignatureMethod": "HMAC-SHA1",
         "SignatureVersion": "1.0",
         "SignatureNonce": str(uuid.uuid4()),
+        # 签名协议要求 UTC，改成上海时间会导致请求被拒绝。
         "Timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     params.update({key: str(value) for key, value in extra.items() if value is not None})

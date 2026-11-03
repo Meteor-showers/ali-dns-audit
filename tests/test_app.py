@@ -1,7 +1,6 @@
 import os
 import re
 import tempfile
-from datetime import datetime
 
 os.environ["DNS_DATA_DIR"] = tempfile.mkdtemp(prefix="dns-console-")
 os.environ["DNS_AUTO_SYNC"] = "0"
@@ -102,11 +101,16 @@ def test_page_window_keeps_ends_and_nearby_pages():
 
 
 def test_record_stamp_accepts_milliseconds_and_text():
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     from app.db import record_stamp
+    from app.log import SHANGHAI
 
-    assert record_stamp(1666501957000) == datetime.fromtimestamp(1666501957).strftime("%Y-%m-%d %H:%M:%S")
+    shanghai = datetime.fromtimestamp(1666501957, SHANGHAI).strftime("%Y-%m-%d %H:%M:%S")
+    utc = datetime.fromtimestamp(1666501957, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    assert record_stamp(1666501957000) == shanghai
+    assert shanghai != utc
+    assert record_stamp("2024-01-02T03:04:05Z") == "2024-01-02 11:04:05"
     assert record_stamp("2021-03-28 11:27:09") == "2021-03-28 11:27:09"
     assert record_stamp("") == ""
 
@@ -133,7 +137,9 @@ def test_refresh_stays_quiet_until_data_is_old_and_edits_win():
     scheduler._cycle = True
     assert scheduler.busy_zone(1, "example.com") is False
     assert ns_due({"ns_checked_at": ""}) is True
-    recent = datetime.now().isoformat(timespec="seconds")
+    from app.db import clock
+
+    recent = clock().isoformat(timespec="seconds")
     assert site_due({"last_error": "失败", "last_sync_at": recent}) is False
     invalidate_zone(7, "A.com")
     seen = revision(7, "a.com")
@@ -448,6 +454,11 @@ def test_log_time_is_shanghai_wall_clock():
     record.created = datetime(2026, 10, 23, 2, 33, 5, tzinfo=timezone.utc).timestamp()
     line = ShanghaiFormatter("%(asctime)s %(message)s", DATE_FORMAT).format(record)
     assert line == "2026-10-23 10:33:05 hello"
+    from app.db import clock, now
+
+    utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    assert abs((clock() - utc).total_seconds() - 8 * 3600) < 2
+    assert now() == clock().isoformat(timespec="seconds")
     logging.getLogger("app").info("shanghai-mark")
     text = log_path().read_text(encoding="utf-8")
     assert "shanghai-mark" in text
@@ -746,7 +757,7 @@ def test_godaddy_replaces_one_value_and_hides_status_switch():
 
 
 def test_query_result_shows_where_the_domain_is_used(monkeypatch):
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
     from app.dns.products import covers, domain_listed, find_usage, hints_for, oss_cnames, usage_phrase
 
@@ -777,8 +788,8 @@ def test_query_result_shows_where_the_domain_is_used(monkeypatch):
     usage_db.write_usage("empty.example", "fp", "")
     usage_db.write_usage("hit.example", "fp", "在秀色的 CDN 使用")
     with usage_db.connect() as conn:
-        recent = (datetime.now() - timedelta(minutes=30)).isoformat(timespec="seconds")
-        stale_miss = (datetime.now() - timedelta(hours=2)).isoformat(timespec="seconds")
+        recent = (usage_db.clock() - timedelta(minutes=30)).isoformat(timespec="seconds")
+        stale_miss = (usage_db.clock() - timedelta(hours=2)).isoformat(timespec="seconds")
         conn.execute("UPDATE usage_cache SET checked_at = ? WHERE fqdn = ?", (recent, "empty.example"))
         conn.execute("UPDATE usage_cache SET checked_at = ? WHERE fqdn = ?", (stale_miss, "hit.example"))
     assert usage_db.read_usage("empty.example", "fp") == ""
@@ -946,7 +957,7 @@ def test_query_result_shows_where_the_domain_is_used(monkeypatch):
     assert calls["n"] == 1
     from app import db as usage_db
 
-    old = (datetime.now() - timedelta(hours=25)).isoformat(timespec="seconds")
+    old = (usage_db.clock() - timedelta(hours=25)).isoformat(timespec="seconds")
     with usage_db.connect() as conn:
         conn.execute("UPDATE usage_cache SET checked_at = ? WHERE fqdn = ?", (old, "wb.xiu361.cn"))
     assert find_usage(accounts, "wb.xiu361.cn", values) == "在秀色的 CDN 使用"

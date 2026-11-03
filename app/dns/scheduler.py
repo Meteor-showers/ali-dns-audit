@@ -26,7 +26,7 @@ def is_fresh(stamp: str, limit: int = FRESH_SECONDS) -> bool:
         then = datetime.fromisoformat(stamp)
     except ValueError:
         return False
-    return (datetime.now() - then).total_seconds() < limit
+    return (db.clock() - then).total_seconds() < limit
 
 
 def records_due(zone: dict) -> bool:

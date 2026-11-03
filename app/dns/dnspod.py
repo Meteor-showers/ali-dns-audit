@@ -16,6 +16,7 @@ TOKEN_ENDPOINT = "https://dnsapi.cn"
 
 
 def _tc3_headers(secret_id: str, secret_key: str, action: str, body: str, timestamp: int) -> dict:
+    # 签名协议要求 UTC 日期，改成上海时间会导致请求被拒绝。
     date = datetime.fromtimestamp(timestamp, timezone.utc).strftime("%Y-%m-%d")
     content_type = "application/json; charset=utf-8"
     canonical_headers = f"content-type:{content_type}\nhost:{TENCENT_HOST}\n"

@@ -14,14 +14,17 @@ RUN if [ "$USE_CN_MIRROR" = "1" ]; then \
       fi; \
     fi \
     && apt-get update \
-    && apt-get install -y --no-install-recommends dnsutils \
+    && apt-get install -y --no-install-recommends dnsutils tzdata \
+    && ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo Asia/Shanghai > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -i "$PIP_INDEX" -r requirements.txt
 COPY app ./app
-ENV DNS_DATA_DIR=/app/data
+ENV DNS_DATA_DIR=/app/data \
+    TZ=Asia/Shanghai
 RUN mkdir -p /app/data
 VOLUME /app/data
 EXPOSE 8080

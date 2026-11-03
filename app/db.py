@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from app.log import SHANGHAI, shanghai_now
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -162,7 +164,11 @@ def init() -> None:
 
 
 def now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return shanghai_now().isoformat(timespec="seconds")
+
+
+def clock() -> datetime:
+    return shanghai_now()
 
 
 def record_stamp(value) -> str:
@@ -176,9 +182,18 @@ def record_stamp(value) -> str:
         if number > 10_000_000_000:
             number //= 1000
         try:
-            return datetime.fromtimestamp(number).strftime("%Y-%m-%d %H:%M:%S")
+            return datetime.fromtimestamp(number, SHANGHAI).strftime("%Y-%m-%d %H:%M:%S")
         except (OverflowError, OSError, ValueError):
             return ""
+    if text.endswith("Z") or "+" in text[10:]:
+        try:
+            moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            moment = None
+        if moment is not None:
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=timezone.utc)
+            return moment.astimezone(SHANGHAI).strftime("%Y-%m-%d %H:%M:%S")
     return text.replace("T", " ")[:19]
 
 
@@ -733,7 +748,7 @@ def read_usage(fqdn: str, fingerprint: str) -> str | None:
     except ValueError:
         return None
     limit = timedelta(hours=1) if row["phrase"] == "" else timedelta(hours=24)
-    if datetime.now() - checked > limit:
+    if clock() - checked > limit:
         return None
     return row["phrase"]
 
@@ -765,7 +780,7 @@ def read_catalog(account_id: str, zone: str, product: str) -> tuple[set[str], bo
         checked = datetime.fromisoformat(row["checked_at"])
     except ValueError:
         return None
-    if datetime.now() - checked > timedelta(minutes=30):
+    if clock() - checked > timedelta(minutes=30):
         return None
     names = {item for item in (row["names"] or "").split("\n") if item}
     return names, bool(row["complete"])
