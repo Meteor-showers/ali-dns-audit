@@ -260,10 +260,7 @@ def ns_view(zone: dict, updating: bool = False) -> dict:
 def guest_allowed(path: str, method: str) -> bool:
     if method == "POST":
         return path == "/login"
-    if path in {"/", "/search", "/login", "/zone", "/zone/live", "/zone/usage", "/sites/live"}:
-        return True
-    parts = [part for part in path.split("/") if part]
-    return len(parts) == 3 and parts[0] == "sites" and parts[1].isdigit() and parts[2] in {"domains", "live"}
+    return path in {"/", "/search", "/login", "/zone", "/zone/live", "/zone/usage", "/sites/live"}
 
 
 @app.middleware("http")
@@ -402,7 +399,7 @@ def search(request: Request, q: str = ""):
     cleaned = normalize_query(query)
     if not matches:
         return render(request, "search.html", active="search", query=cleaned or query, matches=[])
-    zone = choose_zone(matches)
+    zone = None if request.query_params.get("stay") == "1" else choose_zone(matches)
     if zone:
         host = relative_host(cleaned, zone["domain"])
         rq = host if host and host != "@" else ""
@@ -838,6 +835,18 @@ def aliyun_accounts() -> list[tuple[dict, str | None]]:
     return [(item, proxy_for(item)) for item in db.list_sites() if item["provider"] == "aliyun"]
 
 
+def record_keyword(request: Request, domain: str, query: str, rq: str) -> tuple[str, str]:
+    keyword = rq.strip()
+    if signed_in(request):
+        return keyword, ""
+    implied = relative_host(query, domain) if query.strip() else ""
+    if not implied or implied == "@":
+        return keyword, ""
+    if not keyword:
+        keyword = implied
+    return keyword, implied
+
+
 @app.get("/zone/usage")
 def zone_usage(
     request: Request,
@@ -853,6 +862,7 @@ def zone_usage(
     if not site or not zone:
         return JSONResponse({"items": {}}, status_code=404)
     page_size = choose_page_size(request, size)
+    rq, _scope = record_keyword(request, domain, q, rq)
     records, _total, _page, _pages = db.query_records(site_id, domain, rq, page, page_size)
     try:
         found = load_usages(aliyun_accounts(), domain, records)
@@ -887,6 +897,7 @@ def zone_page(request: Request, site_id: int, domain: str, q: str = "", rq: str 
         for item in db.list_zones()
         if item["domain"].lower() == domain.lower() and item["site_id"] != site_id
     ]
+    rq, guest_scope = record_keyword(request, domain, q, rq)
     records, total, page, pages = db.query_records(site_id, domain, rq, page, page_size)
     show_usage = bool(q.strip() or rq.strip())
     usages, usage_pending_hosts = preview_usages(aliyun_accounts(), domain, records) if show_usage else ({}, {})
@@ -900,6 +911,7 @@ def zone_page(request: Request, site_id: int, domain: str, q: str = "", rq: str 
         domain=domain,
         query=q,
         rq=rq,
+        guest_scope=guest_scope,
         ns=ns_view(zone, updating),
         updating=updating,
         live_url="/zone/live?" + urlencode({"site_id": str(site_id), "domain": domain}),

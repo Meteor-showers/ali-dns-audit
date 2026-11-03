@@ -3,7 +3,7 @@
 {% block body %}
 <header class="page-head">
   <div>
-    <p class="crumb">{% if signed_in %}<a href="/sites">平台</a><span>/</span>{% endif %}<a href="/sites/{{ site.id }}/domains">{{ site.name }}</a><span>/</span>{{ domain }}</p>
+    <p class="crumb">{% if signed_in %}<a href="/sites">平台</a><span>/</span><a href="/sites/{{ site.id }}/domains">{{ site.name }}</a>{% else %}<a href="/">查询</a>{% if query %}<span>/</span><a href="/search?q={{ quote(query) }}&stay=1">{{ query }}</a>{% endif %}{% endif %}<span>/</span>{{ domain }}</p>
     <h1>{{ domain }}</h1>
     <div class="meta">
       <span class="badge {{ badge_class(ns.location) }}">{{ ns.location }}</span>
@@ -17,10 +17,16 @@
     <p class="warn-line">公网 NS 不在这个平台的 DNS 上。{% if signed_in %}这里改记录不会影响现网访问。{% endif %}</p>
     {% endif %}
     {% for other in others %}
-    <p class="muted head-note"><a href="/zone?site_id={{ other.site_id }}&domain={{ quote(other.domain) }}&stay=1">「{{ other.site_name }}」{{ provider_label(other.provider) }} 里也有这个域名</a></p>
+    <p class="muted head-note"><a href="/zone?site_id={{ other.site_id }}&domain={{ quote(other.domain) }}&stay=1{% if query %}&q={{ quote(query) }}{% endif %}{% if rq %}&rq={{ quote(rq) }}{% endif %}">「{{ other.site_name }}」{{ provider_label(other.provider) }} 里也有这个域名</a></p>
     {% endfor %}
   </div>
+  {% if signed_in %}
   <a class="btn" href="/sites/{{ site.id }}/domains">返回列表</a>
+  {% elif query %}
+  <a class="btn" href="/search?q={{ quote(query) }}&stay=1">返回列表</a>
+  {% else %}
+  <a class="btn" href="/">返回查询</a>
+  {% endif %}
 </header>
 {% include "live.html" %}
 
@@ -43,7 +49,7 @@
       <input type="hidden" name="q" value="{{ query or '' }}">
       <input type="search" name="rq" value="{{ rq or '' }}" placeholder="搜索主机、类型、记录值">
       <button class="btn" type="submit">搜索</button>
-      {% if rq %}<a class="btn" href="/zone?site_id={{ site.id }}&domain={{ quote(domain) }}">清除</a>{% endif %}
+      {% if rq and guest_scope and rq != guest_scope %}<a class="btn" href="/zone?site_id={{ site.id }}&domain={{ quote(domain) }}&q={{ quote(query) }}&rq={{ quote(guest_scope) }}">清除</a>{% elif rq and not guest_scope %}<a class="btn" href="/zone?site_id={{ site.id }}&domain={{ quote(domain) }}{% if query %}&q={{ quote(query) }}{% endif %}">清除</a>{% endif %}
     </form>
     {% if signed_in %}
     <button class="btn btn-primary" type="button" onclick="var box=document.getElementById('add-record'); box.open=!box.open;">添加解析</button>

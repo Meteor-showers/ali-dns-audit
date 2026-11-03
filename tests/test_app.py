@@ -396,9 +396,29 @@ def test_setup_login_and_site_flow():
     assert "添加解析" not in guest_zone.text
     assert 'class="row-edit"' not in guest_zone.text
     assert 'role="switch"' not in guest_zone.text
-    guest_domains = client.get(f"/sites/{site['id']}/domains")
-    assert guest_domains.status_code == 200
-    assert "编辑密钥" not in guest_domains.text
+    assert f"/sites/{site['id']}/domains" not in guest_zone.text
+    guest_from_search = client.get(
+        "/zone",
+        params={"site_id": site["id"], "domain": "example.com", "q": "www.example.com", "rq": "www"},
+    )
+    assert f"/sites/{site['id']}/domains" not in guest_from_search.text
+    assert 'href="/search?q=www.example.com&stay=1"' in guest_from_search.text
+    cleared = client.get("/zone", params={"site_id": site["id"], "domain": "example.com", "q": "www.example.com"})
+    assert 'value="www"' in cleared.text
+    assert "h01" not in cleared.text
+    assert "h21" not in cleared.text
+    assert ">清除</a>" not in cleared.text
+    guest_list = client.get("/search", params={"q": "www.example.com", "stay": "1"})
+    assert guest_list.status_code == 200
+    assert "example.com" in guest_list.text
+    assert "imeeta.com" not in guest_list.text
+    guest_miss = client.get("/search", params={"q": "not-here.test", "stay": "1"})
+    assert "没有找到" in guest_miss.text
+    assert "imeeta.com" not in guest_miss.text
+    assert "示意站" not in guest_miss.text
+    guest_domains = client.get(f"/sites/{site['id']}/domains", follow_redirects=False)
+    assert guest_domains.status_code == 303
+    assert guest_domains.headers["location"] == "/login"
     for blocked_path in ("/settings", "/audit", "/sites", "/sites/new", "/zone/record"):
         blocked = client.get(blocked_path, follow_redirects=False)
         assert blocked.status_code == 303
